@@ -18,7 +18,7 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'XO Canvas',
+        title: 'Ayles Flow',
       },
     ],
     links: [
@@ -39,7 +39,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <ClerkProvider>
+        <ClerkProvider afterSignOutUrl="/">
           <ConvexProvider>
             {children}
             <TanStackDevtools

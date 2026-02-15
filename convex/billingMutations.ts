@@ -7,21 +7,10 @@ const PLAN_CREDITS = {
   pro: 50.0,
 } as const
 
-export const setStripeCustomerId = internalMutation({
-  args: {
-    userId: v.id('users'),
-    stripeCustomerId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.userId, {
-      stripeCustomerId: args.stripeCustomerId,
-    })
-  },
-})
-
 export const activateSubscription = internalMutation({
   args: {
-    stripeCustomerId: v.string(),
+    clerkId: v.string(),
+    polarCustomerId: v.string(),
     subscriptionId: v.string(),
     currentPeriodStart: v.number(),
     currentPeriodEnd: v.number(),
@@ -29,15 +18,14 @@ export const activateSubscription = internalMutation({
   handler: async (ctx, args) => {
     const user = await ctx.db
       .query('users')
-      .withIndex('by_stripeCustomerId', (q) =>
-        q.eq('stripeCustomerId', args.stripeCustomerId),
-      )
+      .withIndex('by_clerkId', (q) => q.eq('clerkId', args.clerkId))
       .unique()
-    if (!user) throw new Error('User not found for stripeCustomerId')
+    if (!user) throw new Error('User not found for clerkId')
 
     const credits = PLAN_CREDITS.pro
 
     await ctx.db.patch(user._id, {
+      polarCustomerId: args.polarCustomerId,
       plan: 'pro',
       subscriptionId: args.subscriptionId,
       subscriptionStatus: 'active',
@@ -60,16 +48,14 @@ export const activateSubscription = internalMutation({
 
 export const renewSubscription = internalMutation({
   args: {
-    stripeCustomerId: v.string(),
+    clerkId: v.string(),
     currentPeriodStart: v.number(),
     currentPeriodEnd: v.number(),
   },
   handler: async (ctx, args) => {
     const user = await ctx.db
       .query('users')
-      .withIndex('by_stripeCustomerId', (q) =>
-        q.eq('stripeCustomerId', args.stripeCustomerId),
-      )
+      .withIndex('by_clerkId', (q) => q.eq('clerkId', args.clerkId))
       .unique()
     if (!user) return
 
@@ -99,7 +85,7 @@ export const renewSubscription = internalMutation({
 
 export const updateSubscriptionStatus = internalMutation({
   args: {
-    stripeCustomerId: v.string(),
+    clerkId: v.string(),
     subscriptionId: v.string(),
     status: v.string(),
     currentPeriodStart: v.number(),
@@ -108,9 +94,7 @@ export const updateSubscriptionStatus = internalMutation({
   handler: async (ctx, args) => {
     const user = await ctx.db
       .query('users')
-      .withIndex('by_stripeCustomerId', (q) =>
-        q.eq('stripeCustomerId', args.stripeCustomerId),
-      )
+      .withIndex('by_clerkId', (q) => q.eq('clerkId', args.clerkId))
       .unique()
     if (!user) return
 
@@ -125,14 +109,12 @@ export const updateSubscriptionStatus = internalMutation({
 
 export const cancelSubscription = internalMutation({
   args: {
-    stripeCustomerId: v.string(),
+    clerkId: v.string(),
   },
   handler: async (ctx, args) => {
     const user = await ctx.db
       .query('users')
-      .withIndex('by_stripeCustomerId', (q) =>
-        q.eq('stripeCustomerId', args.stripeCustomerId),
-      )
+      .withIndex('by_clerkId', (q) => q.eq('clerkId', args.clerkId))
       .unique()
     if (!user) return
 

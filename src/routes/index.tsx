@@ -46,7 +46,7 @@ function ProjectDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-10">
           <div>
-            <h1 className="text-2xl font-bold text-zinc-100">XO Canvas</h1>
+            <h1 className="text-2xl font-bold text-zinc-100">Ayles Flow</h1>
             <p className="text-sm text-zinc-500 mt-1">Your projects</p>
           </div>
           <div className="flex items-center gap-3">
@@ -183,7 +183,7 @@ function Home() {
       </SignedIn>
       <SignedOut>
         <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
-          <SignIn />
+          <SignIn routing="hash" />
         </div>
       </SignedOut>
     </div>

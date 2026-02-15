@@ -1,4 +1,4 @@
-import { RedirectToSignIn, UserButton, useUser } from '@clerk/tanstack-react-start'
+import { SignIn, UserButton, useUser } from '@clerk/tanstack-react-start'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useMutation } from 'convex/react'
 import { ArrowLeft, Loader2 } from 'lucide-react'
@@ -28,9 +28,13 @@ function CanvasProjectPage() {
     }
   }, [isSignedIn, storeUser])
 
-  // Require authentication
+  // Require authentication — show inline sign-in instead of redirecting away
   if (isLoaded && !isSignedIn) {
-    return <RedirectToSignIn />
+    return (
+      <div className="fixed inset-0 z-50 bg-zinc-950 flex items-center justify-center">
+        <SignIn routing="hash" />
+      </div>
+    )
   }
 
   // Loading state

@@ -1,10 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "xo-canvas",
+  "account_id": "baf605d1cb0470df3175821e6c12e982",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
   "main": "@tanstack/react-start/server-entry",
   "vars": {
-    "CONVEX_SITE_URL": "https://valuable-pelican-598.convex.site"
+    "CONVEX_SITE_URL": "https://gregarious-armadillo-279.convex.site",
+    "VITE_CONVEX_URL": "https://gregarious-armadillo-279.convex.cloud",
+    "VITE_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuYXlsZXNmbG93LmNvbSQ"
   }
 }

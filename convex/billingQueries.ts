@@ -30,6 +30,7 @@ export const getSubscription = query({
       creditsLimit: user.creditsLimit ?? 1.0,
       subscriptionStatus: user.subscriptionStatus ?? null,
       currentPeriodEnd: user.currentPeriodEnd ?? null,
+      polarCustomerId: user.polarCustomerId ?? null,
     }
   },
 })

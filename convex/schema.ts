@@ -17,7 +17,7 @@ export default defineSchema({
     name: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
     // Billing
-    stripeCustomerId: v.optional(v.string()),
+    polarCustomerId: v.optional(v.string()),
     subscriptionId: v.optional(v.string()),
     subscriptionStatus: v.optional(v.string()),
     plan: v.optional(v.string()),
@@ -27,7 +27,7 @@ export default defineSchema({
     currentPeriodEnd: v.optional(v.number()),
   })
     .index('by_clerkId', ['clerkId'])
-    .index('by_stripeCustomerId', ['stripeCustomerId']),
+    .index('by_polarCustomerId', ['polarCustomerId']),
   projects: defineTable({
     userId: v.id('users'),
     name: v.string(),

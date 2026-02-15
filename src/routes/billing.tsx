@@ -128,7 +128,9 @@ function BillingContent() {
                 </div>
                 {isPro && subscription.currentPeriodEnd && (
                   <span className="text-xs text-zinc-500">
-                    Renews{' '}
+                    {subscription.subscriptionStatus === 'canceled'
+                      ? 'Cancels'
+                      : 'Renews'}{' '}
                     {new Date(subscription.currentPeriodEnd).toLocaleDateString(
                       undefined,
                       { month: 'long', day: 'numeric', year: 'numeric' },
@@ -329,7 +331,7 @@ function BillingPage() {
       </SignedIn>
       <SignedOut>
         <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
-          <SignIn />
+          <SignIn routing="hash" />
         </div>
       </SignedOut>
     </div>

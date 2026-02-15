@@ -110,12 +110,15 @@ http.route({
 })
 
 http.route({
-  path: '/stripe/webhook',
+  path: '/polar/webhook',
   method: 'POST',
   handler: httpAction(async (ctx, request) => {
-    const signature = request.headers.get('stripe-signature')
-    if (!signature) {
-      return new Response('Missing stripe-signature header', { status: 400 })
+    const webhookId = request.headers.get('webhook-id')
+    const webhookTimestamp = request.headers.get('webhook-timestamp')
+    const webhookSignature = request.headers.get('webhook-signature')
+
+    if (!webhookId || !webhookTimestamp || !webhookSignature) {
+      return new Response('Missing webhook headers', { status: 400 })
     }
 
     const payload = await request.text()
@@ -123,11 +126,13 @@ http.route({
     try {
       await ctx.runAction(internal.billing.handleWebhookEvent, {
         payload,
-        signature,
+        webhookId,
+        webhookTimestamp,
+        webhookSignature,
       })
       return new Response('OK', { status: 200 })
     } catch (err) {
-      console.error('Stripe webhook error:', err)
+      console.error('Polar webhook error:', err)
       return new Response('Webhook processing failed', { status: 400 })
     }
   }),
