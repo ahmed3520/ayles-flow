@@ -264,7 +264,7 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                 messages,
                 model=model,
                 tools=coding_tools if coding_tools else None,
-                max_tokens=16384,
+                max_tokens=8192,
                 temperature=0.4,
             ):
                 etype = event.get("type")

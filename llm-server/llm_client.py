@@ -5,8 +5,10 @@ Used by main.py, coding_agent.py, orchestrator.py, research.py.
 All LLM calls go through OpenRouter with Anthropic-style caching.
 """
 
+import asyncio
 import json
 import os
+import time
 import logging
 from typing import Optional, AsyncGenerator
 
@@ -18,7 +20,7 @@ log = logging.getLogger("llm-client")
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.6"
-DEFAULT_MAX_TOKENS = 16384
+DEFAULT_MAX_TOKENS = 8192
 DEFAULT_TEMPERATURE = 0.4
 
 # --- Singleton client ---
@@ -166,8 +168,19 @@ async def stream_chat(
         tool_calls_in_progress: dict[int, dict] = {}
         reasoning_content = ""
         reasoning_details: list[dict] = []
+        last_yield = time.monotonic()
 
-        async for chunk in stream:
+        # Wrap stream with heartbeat — send ping every 15s to keep connection alive
+        stream_iter = stream.__aiter__()
+        while True:
+            try:
+                chunk = await asyncio.wait_for(stream_iter.__anext__(), timeout=15.0)
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                # No data for 15s — send keepalive so proxies don't kill the connection
+                yield {"type": "ping"}
+                continue
             if hasattr(chunk, 'usage') and chunk.usage:
                 u = chunk.usage
                 cached_tokens = 0
