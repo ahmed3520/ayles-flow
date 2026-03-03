@@ -10,7 +10,8 @@ import type OpenAI from 'openai'
 
 // ─── Configuration ──────────────────────────────────────────────────
 
-const LLM_SERVER_URL = process.env.LLM_SERVER_URL || 'http://localhost:9400'
+export const LLM_SERVER_URL = process.env.LLM_SERVER_URL
+  || (process.env.NODE_ENV === 'production' ? 'https://lm.aylesflow.com' : 'http://localhost:9400')
 
 export const LLM_CONFIG = {
   defaultModel: 'anthropic/claude-sonnet-4.6',

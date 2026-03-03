@@ -1,0 +1,430 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "read",
+      "description": "Read a file from the filesystem.\n\nUsage:\n- The path parameter can be absolute or relative to project root\n- By default, reads the entire file\n- For large files, use offset and limit to read specific line ranges\n- Results are returned with line numbers starting at 1\n\n<example>\nread(path=\"src/app.ts\")\n# Returns entire file content\n\nread(path=\"src/app.ts\", offset=10, limit=20)\n# Returns lines 10-30 (20 lines starting from line 10)\n</example>\n\nIMPORTANT:\n- You MUST use this tool to read files, never use shell commands like `cat`, `head`, `tail`\n- If the file is very large, read in chunks using offset/limit\n- If the file doesn't exist, an error will be returned",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path (absolute or relative to project root)"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Line number to start reading from (1-indexed)"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Number of lines to read"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write",
+      "description": "Write content to a file (creates if doesn't exist, overwrites if exists).\n\nUsage:\n- Creates parent directories automatically if they don't exist\n- Overwrites existing file content completely\n- For small edits to existing files, use `edit` instead (more efficient)\n\n<example>\nwrite(path=\"src/utils.ts\", content=\"export const add = (a, b) => a + b;\")\n</example>\n\nIMPORTANT:\n- ALWAYS prefer using `edit` for modifying existing files\n- NEVER write new files unless explicitly required\n- NEVER proactively create documentation files (*.md) or README files\n- If you're modifying an existing file, use `read` first to understand its content",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path to write to"
+          },
+          "content": {
+            "type": "string",
+            "description": "Complete file content to write"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "edit",
+      "description": "Edit a file by performing exact string replacement.\n\nUsage:\n- You MUST use `read` tool at least once before editing a file\n- Finds `old_string` in the file and replaces it with `new_string`\n- The `old_string` must match exactly, including whitespace and indentation\n- Use `replace_all=true` to replace all occurrences\n\n<example>\n# Replace a single function\nedit(\n    path=\"src/utils.ts\",\n    old_string=\"const add = (a, b) => a + b;\",\n    new_string=\"const add = (a: number, b: number): number => a + b;\"\n)\n\n# Rename a variable across the file\nedit(\n    path=\"src/app.ts\",\n    old_string=\"oldVarName\",\n    new_string=\"newVarName\",\n    replace_all=true\n)\n</example>\n\nIMPORTANT:\n- The edit will FAIL if `old_string` is not found or not unique (unless replace_all=true)\n- Preserve exact indentation from the original file\n- This is more efficient than `write` for small changes",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path to edit"
+          },
+          "old_string": {
+            "type": "string",
+            "description": "Exact text to find and replace (must match exactly including whitespace)"
+          },
+          "new_string": {
+            "type": "string",
+            "description": "Text to replace old_string with"
+          },
+          "replace_all": {
+            "type": "boolean",
+            "description": "Replace all occurrences (default: false, replaces only first)"
+          }
+        },
+        "required": [
+          "path",
+          "old_string",
+          "new_string"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "multi_edit",
+      "description": "Make multiple edits to a single file in one operation.\n\nUse this when you need to make several changes to different parts of the same file.\nAll edits are applied in sequence - if any edit fails, none are applied.\n\n<example>\nmulti_edit(\n    path=\"src/app.ts\",\n    edits=[\n        {\"old_string\": \"import foo\", \"new_string\": \"import bar\"},\n        {\"old_string\": \"const x = 1\", \"new_string\": \"const x = 2\"},\n        {\"old_string\": \"oldName\", \"new_string\": \"newName\", \"replace_all\": true}\n    ]\n)\n</example>\n\nIMPORTANT:\n- All edits follow the same rules as the single `edit` tool\n- Edits are applied in order, so later edits operate on the result of earlier ones\n- Plan carefully to avoid conflicts between edits",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path to edit"
+          },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "old_string": {
+                  "type": "string",
+                  "description": "Text to find"
+                },
+                "new_string": {
+                  "type": "string",
+                  "description": "Text to replace with"
+                },
+                "replace_all": {
+                  "type": "boolean",
+                  "description": "Replace all occurrences"
+                }
+              },
+              "required": [
+                "old_string",
+                "new_string"
+              ]
+            },
+            "description": "List of edit operations to perform"
+          }
+        },
+        "required": [
+          "path",
+          "edits"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete",
+      "description": "Delete a file or directory.\n\n<example>\ndelete(path=\"src/old-file.ts\")\ndelete(path=\"temp/\")  # Deletes directory and all contents\n</example>\n\nWARNING: This permanently deletes files. Use with caution.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path to delete (file or directory)"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mkdir",
+      "description": "Create a directory. Creates parent directories if needed.\n\n<example>\nmkdir(path=\"src/components/ui\")\n</example>",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path to create"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "move",
+      "description": "Move or rename a file or directory.\n\n<example>\nmove(from_path=\"src/old.ts\", to_path=\"src/new.ts\")  # Rename\nmove(from_path=\"src/utils.ts\", to_path=\"lib/utils.ts\")  # Move\n</example>",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from_path": {
+            "type": "string",
+            "description": "Current path"
+          },
+          "to_path": {
+            "type": "string",
+            "description": "New path"
+          }
+        },
+        "required": [
+          "from_path",
+          "to_path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "grep",
+      "description": "A powerful search tool built on ripgrep.\n\nUsage:\n- ALWAYS use grep for search tasks. NEVER invoke `grep` or `rg` as a shell command.\n- Supports full regex syntax (e.g., \"log.*Error\", \"function\\\\s+\\\\w+\")\n- Filter files with glob parameter (e.g., \"*.js\", \"**/*.tsx\") or type parameter (e.g., \"js\", \"py\", \"rust\")\n- Output modes: \"content\" shows matching lines, \"files_with_matches\" shows only file paths (default), \"count\" shows match counts\n- Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (use `interface\\\\{\\\\}` to find `interface{}` in Go code)\n- Multiline matching: By default patterns match within single lines only. For cross-line patterns like `struct \\\\{[\\\\s\\\\S]*?field`, use `multiline: true`\n\n<example>\ngrep(pattern=\"useState\", output_mode=\"content\", line_numbers=true)\n# Find all useState usages with line numbers\n\ngrep(pattern=\"function.*export\", path=\"src/\", glob=\"*.ts\", output_mode=\"content\", before_context=2, after_context=2)\n# Find exported functions with context lines\n\ngrep(pattern=\"TODO|FIXME\", output_mode=\"count\")\n# Count TODO and FIXME comments per file\n\ngrep(pattern=\"import.*from\", file_type=\"ts\", output_mode=\"files_with_matches\", head_limit=20)\n# Find first 20 TypeScript files with imports\n</example>\n\nOutput modes:\n- \"files_with_matches\": Returns only file paths (fastest, default)\n- \"content\": Returns matching lines with optional context (-A/-B/-C) and line numbers (-n)\n- \"count\": Returns match counts per file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Regular expression pattern to search for in file contents"
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory to search in. Defaults to current working directory."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Glob pattern to filter files (e.g., '*.js', '*.{ts,tsx}')"
+          },
+          "output_mode": {
+            "type": "string",
+            "enum": [
+              "content",
+              "files_with_matches",
+              "count"
+            ],
+            "description": "Output mode: 'content' shows lines, 'files_with_matches' shows paths (default), 'count' shows counts"
+          },
+          "before_context": {
+            "type": "integer",
+            "description": "Lines to show before each match (rg -B). Only with output_mode='content'"
+          },
+          "after_context": {
+            "type": "integer",
+            "description": "Lines to show after each match (rg -A). Only with output_mode='content'"
+          },
+          "context": {
+            "type": "integer",
+            "description": "Lines to show before AND after each match (rg -C). Only with output_mode='content'"
+          },
+          "line_numbers": {
+            "type": "boolean",
+            "description": "Show line numbers in output (rg -n). Only with output_mode='content'"
+          },
+          "case_insensitive": {
+            "type": "boolean",
+            "description": "Case insensitive search (rg -i)"
+          },
+          "file_type": {
+            "type": "string",
+            "description": "File type to search (rg --type). Common types: js, ts, py, rust, go, java, etc."
+          },
+          "head_limit": {
+            "type": "integer",
+            "description": "Limit output to first N lines/entries. Works across all output modes."
+          },
+          "multiline": {
+            "type": "boolean",
+            "description": "Enable multiline mode where . matches newlines and patterns can span lines (rg -U). Default: false."
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "glob",
+      "description": "Find files by name or glob pattern.\n\nFast file pattern matching for finding files by name.\n\n<example>\nglob(pattern=\"*.tsx\")\n# Find all .tsx files\n\nglob(pattern=\"**/*.test.ts\", path=\"src\")\n# Find all test files in src/\n\nglob(pattern=\"package.json\")\n# Find package.json files\n</example>\n\nReturns a list of matching file paths.\n\nIMPORTANT: Use this for finding files by name. Use `grep` for searching file contents.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern (e.g., '*.ts', '**/*.json', 'App.tsx')"
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search in (default: current directory)"
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "ls",
+      "description": "List files and directories in a given path.\n\nReturns file names, paths, and whether each entry is a directory.\n\n<example>\nls(path=\".\")\n# Returns: [{\"name\": \"src\", \"path\": \"./src\", \"isDirectory\": true}, ...]\n\nls(path=\"src\", ignore=[\"node_modules\", \"*.log\"])\n</example>\n\nIMPORTANT: Prefer using `glob` or `grep` if you know what you're looking for.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Directory path (default: current directory)"
+          },
+          "ignore": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Glob patterns to ignore"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "shell",
+      "description": "Execute a shell command and return its output.\n\nTo run a command, just pass \"command\":\n  shell(command=\"npm run build\")\n  shell(command=\"npm install\", timeout_ms=180000)\n  shell(command=\"npm run dev\", background=true, name=\"dev-server\")\n\nDo NOT pass \"action\" when running a command — \"command\" and \"action\" are mutually exclusive.\n\nTo manage background processes (ONLY when you have no command to run):\n  shell(action=\"list\")\n  shell(action=\"output\", process_id=\"bg_0\")\n  shell(action=\"stop\", process_id=\"bg_0\")\n\nIMPORTANT:\n- NEVER use cat, head, tail to read files — use the read tool instead\n- NEVER use cat, echo, heredoc to create files — use the write tool instead\n- NEVER use sed, awk to edit files — use the edit tool instead\n- NEVER use grep, rg commands — use the grep tool instead\n- Use background=true for dev servers and watch processes\n- Default timeout is 2 minutes; increase for long builds",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute (required for running commands, not needed for action=list)"
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory (relative to project root)"
+          },
+          "timeout_ms": {
+            "type": "number",
+            "description": "Timeout in ms (default 120000). Use higher for npm install, builds."
+          },
+          "background": {
+            "type": "boolean",
+            "description": "Run as background process (for dev servers, watch processes)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Friendly name for background process (e.g., \"dev-server\")"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "output",
+              "stop",
+              "list"
+            ],
+            "description": "Action for background processes: \"output\" (get logs), \"stop\" (terminate), \"list\" (show all)"
+          },
+          "process_id": {
+            "type": "string",
+            "description": "Process ID for output or stop actions (e.g., \"bg_0\")"
+          },
+          "lines": {
+            "type": "number",
+            "description": "Number of output lines to return (default 50, for action=output)"
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "lint",
+      "description": "Check a file for syntax errors and lint issues. Detects language automatically from file extension.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path to lint"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "workspace_info",
+      "description": "Get workspace information: project type, file tree, package.json contents, pre-installed UI components. Only use this if your system prompt does NOT already describe the template structure.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "max_depth": {
+            "type": "number",
+            "description": "Max directory depth for file tree (default 3)"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "load_skill",
+      "description": "Load a skill by name. Returns reference documentation for frameworks, patterns, and best practices. Always load relevant skills BEFORE writing code for that framework.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Skill name (e.g., \"frontend-design\", \"convex\", \"tailwind-v4-shadcn\")"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_preview_url",
+      "description": "Get the public preview URL for a running dev server in the sandbox.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "number",
+            "description": "Port number the dev server is running on"
+          }
+        },
+        "required": [
+          "port"
+        ]
+      }
+    }
+  }
+]

@@ -729,12 +729,6 @@ export default function AgentPanel({
                 }
               />
             ))}
-            {toolStatus && isStreaming && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-xs text-zinc-400">
-                <Loader2 size={12} className="text-blue-500/60 animate-spin shrink-0" />
-                <span className="truncate">{toolStatus}</span>
-              </div>
-            )}
             <div ref={messagesEndRef} />
           </div>
 
