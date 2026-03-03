@@ -131,24 +131,31 @@ def _get_lsp_diagnostics(sandbox: Sandbox, lsp_port: Optional[int], file_path: s
         return None
 
 
-# --- R2 sync (fire-and-forget via asyncio) ---
+# --- R2 sync (fire-and-forget via threading — never blocks async loop) ---
+
+import threading
+
 
 def _sync_to_r2(project_id: str, workdir: str, path: str, content: str):
-    """Fire-and-forget R2 upload."""
-    try:
-        rel = to_relative_path(path, workdir)
-        r2_put(project_id, rel, content)
-    except Exception as e:
-        log.warning(f"[r2-sync] {e}")
+    """Fire-and-forget R2 upload in a background thread."""
+    def _do():
+        try:
+            rel = to_relative_path(path, workdir)
+            r2_put(project_id, rel, content)
+        except Exception as e:
+            log.warning(f"[r2-sync] {e}")
+    threading.Thread(target=_do, daemon=True).start()
 
 
 def _delete_from_r2(project_id: str, workdir: str, path: str):
-    """Fire-and-forget R2 delete."""
-    try:
-        rel = to_relative_path(path, workdir)
-        r2_delete(project_id, rel)
-    except Exception as e:
-        log.warning(f"[r2-sync] {e}")
+    """Fire-and-forget R2 delete in a background thread."""
+    def _do():
+        try:
+            rel = to_relative_path(path, workdir)
+            r2_delete(project_id, rel)
+        except Exception as e:
+            log.warning(f"[r2-sync] {e}")
+    threading.Thread(target=_do, daemon=True).start()
 
 
 # --- Skill loader (reads from disk) ---
@@ -248,7 +255,7 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
         sandbox.files.write(path, content)
         await ctx.write({"type": "file_change", "path": path, "action": "create"})
         # R2 sync (fire-and-forget)
-        asyncio.get_event_loop().run_in_executor(None, _sync_to_r2, ctx.project_id, ctx.workdir, path, content)
+        _sync_to_r2(ctx.project_id, ctx.workdir, path, content)
         diags = _get_lsp_diagnostics(sandbox, ctx.lsp_port, path)
         result = {"success": True, "path": path}
         if diags:
@@ -300,7 +307,7 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
 
         sandbox.files.write(path, content)
         await ctx.write({"type": "file_change", "path": path, "action": "update"})
-        asyncio.get_event_loop().run_in_executor(None, _sync_to_r2, ctx.project_id, ctx.workdir, path, content)
+        _sync_to_r2(ctx.project_id, ctx.workdir, path, content)
         diags = _get_lsp_diagnostics(sandbox, ctx.lsp_port, path)
         result = {"success": True, "path": path, "edits_applied": len(edits)}
         if diags:
@@ -311,7 +318,7 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
         path = _resolve_path(args["path"], ctx.workdir)
         sandbox.commands.run(f"rm -rf '{_shell_escape(path)}'")
         await ctx.write({"type": "file_change", "path": path, "action": "delete"})
-        asyncio.get_event_loop().run_in_executor(None, _delete_from_r2, ctx.project_id, ctx.workdir, path)
+        _delete_from_r2(ctx.project_id, ctx.workdir, path)
         return {"success": True, "path": path}
 
     if tool_name == "mkdir":
@@ -325,10 +332,10 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
         sandbox.commands.run(f"mv '{_shell_escape(from_path)}' '{_shell_escape(to_path)}'")
         await ctx.write({"type": "file_change", "path": from_path, "action": "delete"})
         await ctx.write({"type": "file_change", "path": to_path, "action": "create"})
-        asyncio.get_event_loop().run_in_executor(None, _delete_from_r2, ctx.project_id, ctx.workdir, from_path)
+        _delete_from_r2(ctx.project_id, ctx.workdir, from_path)
         try:
             new_content = sandbox.files.read(to_path)
-            asyncio.get_event_loop().run_in_executor(None, _sync_to_r2, ctx.project_id, ctx.workdir, to_path, new_content)
+            _sync_to_r2(ctx.project_id, ctx.workdir, to_path, new_content)
         except Exception:
             pass
         return {"success": True, "from": from_path, "to": to_path}
