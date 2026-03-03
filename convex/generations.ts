@@ -28,22 +28,44 @@ export const create = mutation({
       throw new Error('User not found')
     }
 
-    // Look up model to get creditCost
+    // Look up model to get pricing
     const model = await ctx.db
       .query('models')
       .withIndex('by_falId', (q) => q.eq('falId', args.modelId))
       .unique()
     if (!model) throw new Error('Model not found')
 
-    // Check credits
-    const currentCredits = user.credits ?? 1.0
+    const currentCredits = user.credits ?? 0
+    const isTokenPriced =
+      (model.inputTokenCost ?? 0) > 0 || (model.outputTokenCost ?? 0) > 0
+
+    if (isTokenPriced) {
+      // Token-priced models (text/LLM via OpenRouter):
+      // Don't deduct upfront — actual cost depends on token usage.
+      // Just verify the user has credits remaining.
+      if (currentCredits <= 0) {
+        throw new Error(
+          `Insufficient credits. Have ${currentCredits.toFixed(3)}`,
+        )
+      }
+
+      return await ctx.db.insert('generations', {
+        userId: user._id,
+        contentType: args.contentType,
+        modelId: args.modelId,
+        prompt: args.prompt,
+        status: 'submitted',
+        createdAt: Date.now(),
+      })
+    }
+
+    // Flat-rate models (FAL): deduct credits upfront
     if (currentCredits < model.creditCost) {
       throw new Error(
         `Insufficient credits. Need ${model.creditCost}, have ${currentCredits.toFixed(3)}`,
       )
     }
 
-    // Deduct credits atomically
     const newBalance = currentCredits - model.creditCost
     await ctx.db.patch(user._id, { credits: newBalance })
 
@@ -56,7 +78,6 @@ export const create = mutation({
       createdAt: Date.now(),
     })
 
-    // Log credit transaction
     await ctx.db.insert('creditTransactions', {
       userId: user._id,
       type: 'deduction',
@@ -128,6 +149,64 @@ export const completeGeneration = internalMutation({
       status: 'completed',
       resultUrl: args.resultUrl,
       resultMeta: args.resultMeta,
+      completedAt: Date.now(),
+    })
+  },
+})
+
+export const completeTextGeneration = mutation({
+  args: {
+    generationId: v.id('generations'),
+    resultText: v.string(),
+    inputTokens: v.number(),
+    outputTokens: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity()
+    if (!identity) throw new Error('Not authenticated')
+
+    const generation = await ctx.db.get(args.generationId)
+    if (!generation) throw new Error('Generation not found')
+
+    // Look up model for token pricing
+    const model = await ctx.db
+      .query('models')
+      .withIndex('by_falId', (q) => q.eq('falId', generation.modelId))
+      .unique()
+
+    let tokenCreditCost = 0
+    if (model) {
+      const inputCost =
+        (args.inputTokens / 1_000_000) * (model.inputTokenCost ?? 0)
+      const outputCost =
+        (args.outputTokens / 1_000_000) * (model.outputTokenCost ?? 0)
+      tokenCreditCost = Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000
+    }
+
+    // Deduct credits based on actual token usage
+    const user = await ctx.db.get(generation.userId)
+    if (user && tokenCreditCost > 0) {
+      const currentCredits = user.credits ?? 0
+      const newBalance = currentCredits - tokenCreditCost
+      await ctx.db.patch(user._id, { credits: newBalance })
+
+      await ctx.db.insert('creditTransactions', {
+        userId: user._id,
+        type: 'deduction',
+        amount: -tokenCreditCost,
+        balance: newBalance,
+        description: `${model?.name ?? 'Text'} generation (${args.inputTokens}in + ${args.outputTokens}out tokens)`,
+        generationId: generation._id,
+        createdAt: Date.now(),
+      })
+    }
+
+    await ctx.db.patch(generation._id, {
+      status: 'completed',
+      resultText: args.resultText,
+      inputTokens: args.inputTokens,
+      outputTokens: args.outputTokens,
+      tokenCreditCost,
       completedAt: Date.now(),
     })
   },

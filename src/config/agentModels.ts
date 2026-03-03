@@ -1,16 +1,17 @@
 export type AgentModelOption = {
   id: string
   name: string
+  comingSoon?: boolean
 }
 
 export const AGENT_MODELS: Array<AgentModelOption> = [
+  { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' },
+  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
   { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
-  { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
-  { id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash' },
   { id: 'minimax/minimax-m2.1', name: 'MiniMax M2.1' },
-  { id: 'minimax/minimax-m2-her', name: 'MiniMax M2 Her' },
-  { id: 'z-ai/glm-4.7', name: 'GLM 4.7' },
+  { id: 'z-ai/glm-5', name: 'GLM 5' },
   { id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5' },
+  { id: 'ayles/quasar-v1', name: 'Quasar v1', comingSoon: true },
 ]
 
 export const DEFAULT_AGENT_MODEL = 'anthropic/claude-sonnet-4.5'

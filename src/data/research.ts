@@ -1,5 +1,4 @@
-import type OpenAI from 'openai'
-
+import { AIClient } from '@/config/llm'
 import { groqWeb } from '@/data/groq'
 
 export type ResearchResult = {
@@ -28,8 +27,7 @@ function parseJsonQueries(text: string): Array<string> {
 
 export async function deepResearch(
   topic: string,
-  client: OpenAI,
-  model: string,
+  ai: AIClient,
   writeStatus: StatusWriter,
 ): Promise<ResearchResult> {
   const allSources: Array<{ title: string; url: string }> = []
@@ -48,19 +46,15 @@ export async function deepResearch(
 
   let initialQueries: Array<string> = []
   try {
-    const queryGenResponse = await client.chat.completions.create({
-      model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Generate 4-5 diverse search queries to thoroughly research the given topic. Return ONLY a JSON array of strings like: ["query 1", "query 2", "query 3", "query 4"]. Cover different angles: definitions, latest developments, expert opinions, comparisons, practical applications. Return ONLY the JSON array, nothing else.',
-        },
-        { role: 'user', content: topic },
-      ],
-    })
-    const raw = queryGenResponse.choices[0]?.message.content || ''
-    initialQueries = parseJsonQueries(raw)
+    const result = await ai.chat([
+      {
+        role: 'system',
+        content:
+          'Generate 4-5 diverse search queries to thoroughly research the given topic. Return ONLY a JSON array of strings like: ["query 1", "query 2", "query 3", "query 4"]. Cover different angles: definitions, latest developments, expert opinions, comparisons, practical applications. Return ONLY the JSON array, nothing else.',
+      },
+      { role: 'user', content: topic },
+    ])
+    initialQueries = parseJsonQueries(result.content || '')
   } catch {
     // LLM call failed
   }
@@ -102,22 +96,18 @@ export async function deepResearch(
 
   let followUpQueries: Array<string> = []
   try {
-    const followUpResponse = await client.chat.completions.create({
-      model,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are a research analyst. Based on the initial research findings below, identify gaps and generate 2-3 follow-up search queries to fill those gaps. Return ONLY a JSON array of query strings like: ["query 1", "query 2"]. Return ONLY the JSON array, nothing else.',
-        },
-        {
-          role: 'user',
-          content: `Topic: ${topic}\n\nInitial findings:\n${allContent.join('\n\n---\n\n')}`,
-        },
-      ],
-    })
-    const raw = followUpResponse.choices[0]?.message.content || ''
-    followUpQueries = parseJsonQueries(raw)
+    const result = await ai.chat([
+      {
+        role: 'system',
+        content:
+          'You are a research analyst. Based on the initial research findings below, identify gaps and generate 2-3 follow-up search queries to fill those gaps. Return ONLY a JSON array of query strings like: ["query 1", "query 2"]. Return ONLY the JSON array, nothing else.',
+      },
+      {
+        role: 'user',
+        content: `Topic: ${topic}\n\nInitial findings:\n${allContent.join('\n\n---\n\n')}`,
+      },
+    ])
+    followUpQueries = parseJsonQueries(result.content || '')
   } catch {
     // Follow-up generation failed, skip
   }
@@ -154,12 +144,10 @@ export async function deepResearch(
     .map((s, i) => `[${i + 1}] ${s.title} - ${s.url}`)
     .join('\n')
 
-  const synthesisResponse = await client.chat.completions.create({
-    model,
-    messages: [
-      {
-        role: 'system',
-        content: `You are a research writer. Synthesize the following research findings into a well-structured document.
+  const synthesisResult = await ai.chat([
+    {
+      role: 'system',
+      content: `You are a research writer. Synthesize the following research findings into a well-structured document.
 
 Requirements:
 - Start with a clear title (# Title)
@@ -173,15 +161,14 @@ Requirements:
 
 Available sources for citation:
 ${sourcesList}`,
-      },
-      {
-        role: 'user',
-        content: `Topic: ${topic}\n\nResearch findings:\n${allContent.join('\n\n---\n\n')}`,
-      },
-    ],
-  })
+    },
+    {
+      role: 'user',
+      content: `Topic: ${topic}\n\nResearch findings:\n${allContent.join('\n\n---\n\n')}`,
+    },
+  ])
 
-  const markdown = synthesisResponse.choices[0]?.message.content || ''
+  const markdown = synthesisResult.content || ''
 
   // Extract title from markdown
   const titleMatch = markdown.match(/^#\s+(.+)$/m)
@@ -190,18 +177,15 @@ ${sourcesList}`,
   // --- Phase 6: Generate brief summary ---
   await writeStatus('Generating summary...')
 
-  const summaryResponse = await client.chat.completions.create({
-    model,
-    messages: [
-      {
-        role: 'system',
-        content:
-          'Summarize this research document in 2-3 sentences. Be concise and highlight the key findings.',
-      },
-      { role: 'user', content: markdown },
-    ],
-  })
-  const summary = summaryResponse.choices[0]?.message.content || ''
+  const summaryResult = await ai.chat([
+    {
+      role: 'system',
+      content:
+        'Summarize this research document in 2-3 sentences. Be concise and highlight the key findings.',
+    },
+    { role: 'user', content: markdown },
+  ])
+  const summary = summaryResult.content || ''
 
   await writeStatus('Research complete!')
 

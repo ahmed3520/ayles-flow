@@ -18,7 +18,7 @@ import type {
 } from '@/types/agent'
 import type { BlockNodeData } from '@/types/nodes'
 import { DEFAULT_AGENT_MODEL } from '@/config/agentModels'
-import { PORT_TYPE_COLORS } from '@/types/nodes'
+import { NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
 import { generateResearchPdf } from '@/utils/pdfGeneration'
 
 type UseAgentChatOptions = {
@@ -29,6 +29,7 @@ type UseAgentChatOptions = {
   setEdges: React.Dispatch<React.SetStateAction<Array<Edge>>>
   nodeIdRef: React.RefObject<number>
   models: Array<AvailableModel>
+  pushSnapshot?: (nodes: Node[], edges: Edge[]) => void
 }
 
 export function useAgentChat({
@@ -39,6 +40,7 @@ export function useAgentChat({
   setEdges,
   nodeIdRef,
   models,
+  pushSnapshot,
 }: UseAgentChatOptions) {
   const [activeChatId, setActiveChatId] = useState<Id<'chats'> | null>(null)
   const [messages, setMessages] = useState<Array<ChatMessage>>([])
@@ -48,6 +50,7 @@ export function useAgentChat({
   const [toolStatus, setToolStatus] = useState<string | null>(null)
   const [agentModel, setAgentModel] = useState(DEFAULT_AGENT_MODEL)
   const abortRef = useRef<AbortController | null>(null)
+  const readerRef = useRef<ReadableStreamDefaultReader | null>(null)
   const loadedChatRef = useRef<string | null>(null)
   const activeChatIdRef = useRef<Id<'chats'> | null>(null)
   activeChatIdRef.current = activeChatId
@@ -161,6 +164,7 @@ export function useAgentChat({
   // Apply a single action to the canvas
   const applyAction = useCallback(
     (action: AgentAction) => {
+      pushSnapshot?.(nodesRef.current, edgesRef.current)
       switch (action.type) {
         case 'add_node': {
           const nodeId = action.nodeId
@@ -173,16 +177,20 @@ export function useAgentChat({
             )
           }
 
+          const defaults = NODE_DEFAULTS[action.contentType]
           const newNode: Node<BlockNodeData> = {
             id: nodeId,
             type: 'blockNode',
             position: { x: action.x, y: action.y },
+            style: { width: defaults.width, height: defaults.height },
             data: {
               contentType: action.contentType,
               label: action.label || `New ${action.contentType} block`,
               prompt: action.prompt || '',
               model: action.model || '',
               generationStatus: 'idle',
+              ...(action.previewUrl && { previewUrl: action.previewUrl }),
+              ...(action.sandboxId && { sandboxId: action.sandboxId }),
             },
           }
           setNodes((nds) => [...nds, newNode])
@@ -243,7 +251,7 @@ export function useAgentChat({
         }
       }
     },
-    [setNodes, setEdges, nodeIdRef],
+    [setNodes, setEdges, nodeIdRef, pushSnapshot],
   )
 
   // Build canvas state snapshot for the server
@@ -314,7 +322,7 @@ export function useAgentChat({
   // Send a message to the agent
   const send = useCallback(
     async (content: string) => {
-      if (!content.trim() || streamingChatId === activeChatId) return
+      if (!content.trim() || (streamingChatId != null && streamingChatId === activeChatId)) return
 
       // Auto-create a chat if none exists
       let chatId = activeChatId
@@ -360,23 +368,37 @@ export function useAgentChat({
 
       try {
         // Build the messages history for context (last 20 messages)
-        // Use ref to avoid stale closure when switching chats
-        const historyMessages = [...messagesRef.current, userMsg]
+        // messagesRef.current may already include userMsg after the React re-render
+        // triggered by setMessages + the awaits above. Only append if it's missing.
+        const currentMsgs = messagesRef.current
+        const alreadyHasUserMsg = currentMsgs.length > 0 &&
+          currentMsgs[currentMsgs.length - 1].role === 'user' &&
+          currentMsgs[currentMsgs.length - 1].content === content
+        const historyMessages = (alreadyHasUserMsg ? currentMsgs : [...currentMsgs, userMsg])
           .slice(-20)
           .map((m) => ({ role: m.role, content: m.content }))
 
         const canvasState = getCanvasState()
 
         // Call server function — returns a streaming Response
+        // Wrap with abort support since createServerFn doesn't accept signals
         const { agentChat } = await import('@/data/agent')
-        const response = await agentChat({
-          data: {
-            messages: historyMessages,
-            canvasState,
-            models,
-            agentModel,
-          },
-        })
+        const response = await Promise.race([
+          agentChat({
+            data: {
+              messages: historyMessages,
+              canvasState,
+              models,
+              agentModel,
+              projectId: projectId as string,
+            },
+          }),
+          new Promise<never>((_, reject) => {
+            controller.signal.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            )
+          }),
+        ])
 
         // Handle case where createServerFn wraps the response
         const res =
@@ -387,6 +409,7 @@ export function useAgentChat({
         if (!res.body) throw new Error('No response body')
 
         const reader = res.body.getReader()
+        readerRef.current = reader
         const decoder = new TextDecoder()
         let buffer = ''
         let fullContent = ''
@@ -432,7 +455,6 @@ export function useAgentChat({
               case 'text_delta': {
                 if (isActive()) setToolStatus(null)
                 fullContent += event.content
-                // Append to current text part or create new one
                 const lastPart = allParts.at(-1)
                 if (lastPart?.type === 'text') {
                   lastPart.content += event.content
@@ -446,27 +468,68 @@ export function useAgentChat({
                 break
               }
 
+              case 'reasoning': {
+                // Append to current reasoning part, or start a new one.
+                // Within each agentic round, reasoning streams before content/tools,
+                // so checking the last part correctly groups chunks per round.
+                const last = allParts.at(-1)
+                if (last?.type === 'reasoning') {
+                  last.content += event.content
+                } else {
+                  allParts.push({ type: 'reasoning', content: event.content })
+                }
+                updateAssistant({ parts: [...allParts] })
+                break
+              }
+
               case 'tool_status':
                 if (isActive()) setToolStatus(event.status)
                 break
 
-              case 'tool_call':
-                if (isActive()) setToolStatus(null)
+              case 'tool_start':
                 allParts.push({
                   type: 'tool_call',
                   tool: event.tool,
-                  label: event.label,
+                  args: event.args,
+                  status: 'pending',
                 })
                 updateAssistant({ parts: [...allParts] })
                 break
+
+              case 'tool_call': {
+                if (isActive()) setToolStatus(null)
+                let matched = false
+                // Match by tool name first, then fall back to any pending
+                for (let idx = allParts.length - 1; idx >= 0; idx--) {
+                  const p = allParts[idx]
+                  if (p.type === 'tool_call' && p.status === 'pending' && p.tool === event.tool) {
+                    allParts[idx] = { ...p, args: event.args, status: 'done', error: event.error }
+                    matched = true
+                    break
+                  }
+                }
+                if (!matched) {
+                  for (let idx = allParts.length - 1; idx >= 0; idx--) {
+                    const p = allParts[idx]
+                    if (p.type === 'tool_call' && p.status === 'pending') {
+                      allParts[idx] = { ...p, args: event.args, status: 'done', error: event.error }
+                      matched = true
+                      break
+                    }
+                  }
+                }
+                if (!matched) {
+                  allParts.push({ type: 'tool_call', tool: event.tool, args: event.args, status: 'done', error: event.error })
+                }
+                updateAssistant({ parts: [...allParts] })
+                break
+              }
 
               case 'action': {
                 if (isActive()) setToolStatus(null)
 
                 if (event.action.type === 'create_pdf') {
-                  // PDF generation is async & client-side — fire off separately
                   createPdfFromAction(event.action)
-                  // Save a lightweight version (strip large markdown content)
                   const slim = {
                     ...event.action,
                     markdown: '[content]',
@@ -517,16 +580,18 @@ export function useAgentChat({
           }
         }
 
-        // Save assistant message to Convex
-        await sendMessage({
-          chatId,
-          role: 'assistant',
-          content: fullContent,
-          actions: allActions.length > 0 ? allActions : undefined,
-          parts: allParts.length > 0 ? allParts : undefined,
-        })
+        // Save assistant message to Convex (skip if aborted)
+        if (abortRef.current === controller) {
+          await sendMessage({
+            chatId,
+            role: 'assistant',
+            content: fullContent,
+            actions: allActions.length > 0 ? allActions : undefined,
+            parts: allParts.length > 0 ? allParts : undefined,
+          })
+        }
       } catch (err) {
-        if ((err as Error).name !== 'AbortError' && activeChatIdRef.current === chatId) {
+        if ((err as Error).name !== 'AbortError' && abortRef.current === controller) {
           const errMsg =
             err instanceof Error ? err.message : 'Failed to reach agent'
           setMessages((prev) => {
@@ -542,9 +607,13 @@ export function useAgentChat({
           })
         }
       } finally {
-        setStreamingChatId(null)
-        if (activeChatIdRef.current === chatId) setToolStatus(null)
-        abortRef.current = null
+        readerRef.current = null
+        // Only clear streaming state if this is still the active stream
+        if (abortRef.current === controller) {
+          setStreamingChatId(null)
+          setToolStatus(null)
+          abortRef.current = null
+        }
       }
     },
     [
@@ -563,8 +632,12 @@ export function useAgentChat({
   )
 
   const stopStreaming = useCallback(() => {
+    readerRef.current?.cancel()
+    readerRef.current = null
     abortRef.current?.abort()
+    abortRef.current = null
     setStreamingChatId(null)
+    setToolStatus(null)
   }, [])
 
   const clearChat = useCallback(async () => {
@@ -575,7 +648,7 @@ export function useAgentChat({
 
   return {
     messages,
-    isStreaming: streamingChatId === activeChatId,
+    isStreaming: streamingChatId != null && streamingChatId === activeChatId,
     toolStatus,
     agentModel,
     setAgentModel,

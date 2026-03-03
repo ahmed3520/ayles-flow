@@ -1,7 +1,7 @@
-import { SignIn, UserButton, useUser } from '@clerk/tanstack-react-start'
+import { SignedIn, UserButton, useUser } from '@clerk/tanstack-react-start'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useMutation } from 'convex/react'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { useEffect } from 'react'
 
 import { api } from '../../convex/_generated/api'
@@ -18,7 +18,7 @@ export const Route = createFileRoute('/canvas/$projectId')({
 function CanvasProjectPage() {
   const { projectId } = Route.useParams()
   const navigate = useNavigate()
-  const { isLoaded, isSignedIn } = useUser()
+  const { isSignedIn } = useUser()
   const storeUser = useMutation(api.users.store)
 
   // Store user in Convex on mount
@@ -28,34 +28,18 @@ function CanvasProjectPage() {
     }
   }, [isSignedIn, storeUser])
 
-  // Require authentication — show inline sign-in instead of redirecting away
-  if (isLoaded && !isSignedIn) {
-    return (
-      <div className="fixed inset-0 z-50 bg-zinc-950 flex items-center justify-center">
-        <SignIn routing="hash" />
-      </div>
-    )
-  }
-
-  // Loading state
-  if (!isLoaded) {
-    return (
-      <div className="fixed inset-0 z-50 bg-zinc-950 flex items-center justify-center">
-        <Loader2 size={24} className="animate-spin text-zinc-500" />
-      </div>
-    )
-  }
-
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-        <UserButton
-          appearance={{
-            elements: {
-              avatarBox: 'w-9 h-9',
-            },
-          }}
-        />
+        <SignedIn>
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: 'w-9 h-9',
+              },
+            }}
+          />
+        </SignedIn>
       </div>
       <button
         onClick={() => navigate({ to: '/' })}

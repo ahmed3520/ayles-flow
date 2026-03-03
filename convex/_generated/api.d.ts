@@ -14,6 +14,8 @@ import type * as billingQueries from "../billingQueries.js";
 import type * as chatMessages from "../chatMessages.js";
 import type * as chats from "../chats.js";
 import type * as crons from "../crons.js";
+import type * as deployments from "../deployments.js";
+import type * as feedback from "../feedback.js";
 import type * as generations from "../generations.js";
 import type * as http from "../http.js";
 import type * as migrateChatMessages from "../migrateChatMessages.js";
@@ -38,6 +40,8 @@ declare const fullApi: ApiFromModules<{
   chatMessages: typeof chatMessages;
   chats: typeof chats;
   crons: typeof crons;
+  deployments: typeof deployments;
+  feedback: typeof feedback;
   generations: typeof generations;
   http: typeof http;
   migrateChatMessages: typeof migrateChatMessages;

@@ -9,8 +9,15 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TermsRouteImport } from './routes/terms'
+import { Route as QuasarRouteImport } from './routes/quasar'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as DocsRouteImport } from './routes/docs'
+import { Route as ContactRouteImport } from './routes/contact'
+import { Route as ChangelogRouteImport } from './routes/changelog'
 import { Route as CanvasRouteImport } from './routes/canvas'
 import { Route as BillingRouteImport } from './routes/billing'
+import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DemoConvexRouteImport } from './routes/demo/convex'
 import { Route as CanvasProjectIdRouteImport } from './routes/canvas.$projectId'
@@ -22,6 +29,36 @@ import { Route as DemoStartSsrSpaModeRouteImport } from './routes/demo/start.ssr
 import { Route as DemoStartSsrFullSsrRouteImport } from './routes/demo/start.ssr.full-ssr'
 import { Route as DemoStartSsrDataOnlyRouteImport } from './routes/demo/start.ssr.data-only'
 
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuasarRoute = QuasarRouteImport.update({
+  id: '/quasar',
+  path: '/quasar',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ContactRoute = ContactRouteImport.update({
+  id: '/contact',
+  path: '/contact',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChangelogRoute = ChangelogRouteImport.update({
+  id: '/changelog',
+  path: '/changelog',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CanvasRoute = CanvasRouteImport.update({
   id: '/canvas',
   path: '/canvas',
@@ -30,6 +67,11 @@ const CanvasRoute = CanvasRouteImport.update({
 const BillingRoute = BillingRouteImport.update({
   id: '/billing',
   path: '/billing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -85,8 +127,15 @@ const DemoStartSsrDataOnlyRoute = DemoStartSsrDataOnlyRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
   '/billing': typeof BillingRoute
   '/canvas': typeof CanvasRouteWithChildren
+  '/changelog': typeof ChangelogRoute
+  '/contact': typeof ContactRoute
+  '/docs': typeof DocsRoute
+  '/privacy': typeof PrivacyRoute
+  '/quasar': typeof QuasarRoute
+  '/terms': typeof TermsRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
@@ -99,8 +148,15 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
   '/billing': typeof BillingRoute
   '/canvas': typeof CanvasRouteWithChildren
+  '/changelog': typeof ChangelogRoute
+  '/contact': typeof ContactRoute
+  '/docs': typeof DocsRoute
+  '/privacy': typeof PrivacyRoute
+  '/quasar': typeof QuasarRoute
+  '/terms': typeof TermsRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
@@ -114,8 +170,15 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
   '/billing': typeof BillingRoute
   '/canvas': typeof CanvasRouteWithChildren
+  '/changelog': typeof ChangelogRoute
+  '/contact': typeof ContactRoute
+  '/docs': typeof DocsRoute
+  '/privacy': typeof PrivacyRoute
+  '/quasar': typeof QuasarRoute
+  '/terms': typeof TermsRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
@@ -130,8 +193,15 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/about'
     | '/billing'
     | '/canvas'
+    | '/changelog'
+    | '/contact'
+    | '/docs'
+    | '/privacy'
+    | '/quasar'
+    | '/terms'
     | '/canvas/$projectId'
     | '/demo/convex'
     | '/demo/api/names'
@@ -144,8 +214,15 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/about'
     | '/billing'
     | '/canvas'
+    | '/changelog'
+    | '/contact'
+    | '/docs'
+    | '/privacy'
+    | '/quasar'
+    | '/terms'
     | '/canvas/$projectId'
     | '/demo/convex'
     | '/demo/api/names'
@@ -158,8 +235,15 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/about'
     | '/billing'
     | '/canvas'
+    | '/changelog'
+    | '/contact'
+    | '/docs'
+    | '/privacy'
+    | '/quasar'
+    | '/terms'
     | '/canvas/$projectId'
     | '/demo/convex'
     | '/demo/api/names'
@@ -173,8 +257,15 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AboutRoute: typeof AboutRoute
   BillingRoute: typeof BillingRoute
   CanvasRoute: typeof CanvasRouteWithChildren
+  ChangelogRoute: typeof ChangelogRoute
+  ContactRoute: typeof ContactRoute
+  DocsRoute: typeof DocsRoute
+  PrivacyRoute: typeof PrivacyRoute
+  QuasarRoute: typeof QuasarRoute
+  TermsRoute: typeof TermsRoute
   DemoConvexRoute: typeof DemoConvexRoute
   DemoApiNamesRoute: typeof DemoApiNamesRoute
   DemoStartApiRequestRoute: typeof DemoStartApiRequestRoute
@@ -187,6 +278,48 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quasar': {
+      id: '/quasar'
+      path: '/quasar'
+      fullPath: '/quasar'
+      preLoaderRoute: typeof QuasarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/contact': {
+      id: '/contact'
+      path: '/contact'
+      fullPath: '/contact'
+      preLoaderRoute: typeof ContactRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/changelog': {
+      id: '/changelog'
+      path: '/changelog'
+      fullPath: '/changelog'
+      preLoaderRoute: typeof ChangelogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/canvas': {
       id: '/canvas'
       path: '/canvas'
@@ -199,6 +332,13 @@ declare module '@tanstack/react-router' {
       path: '/billing'
       fullPath: '/billing'
       preLoaderRoute: typeof BillingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -287,8 +427,15 @@ const CanvasRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AboutRoute: AboutRoute,
   BillingRoute: BillingRoute,
   CanvasRoute: CanvasRouteWithChildren,
+  ChangelogRoute: ChangelogRoute,
+  ContactRoute: ContactRoute,
+  DocsRoute: DocsRoute,
+  PrivacyRoute: PrivacyRoute,
+  QuasarRoute: QuasarRoute,
+  TermsRoute: TermsRoute,
   DemoConvexRoute: DemoConvexRoute,
   DemoApiNamesRoute: DemoApiNamesRoute,
   DemoStartApiRequestRoute: DemoStartApiRequestRoute,

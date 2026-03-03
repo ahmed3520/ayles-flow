@@ -8,6 +8,9 @@ type UseCanvasKeyboardOptions = {
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>
   nodeIdCounter: React.MutableRefObject<number>
+  pushSnapshot: (nodes: Node[], edges: Edge[]) => void
+  undo: () => void
+  redo: () => void
 }
 
 export function useCanvasKeyboard({
@@ -16,6 +19,9 @@ export function useCanvasKeyboard({
   setNodes,
   setEdges,
   nodeIdCounter,
+  pushSnapshot,
+  undo,
+  redo,
 }: UseCanvasKeyboardOptions) {
   const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
 
@@ -31,6 +37,8 @@ export function useCanvasKeyboard({
   const handlePaste = useCallback(() => {
     if (!clipboardRef.current) return
 
+    pushSnapshot(nodes, edges)
+
     const { nodes: newNodes, edges: newEdges, newIdCounter } = pasteNodes(
       clipboardRef.current,
       nodeIdCounter.current,
@@ -42,7 +50,7 @@ export function useCanvasKeyboard({
       [...nds.map((n) => ({ ...n, selected: false })), ...newNodes],
     )
     setEdges((eds) => [...eds, ...newEdges])
-  }, [setNodes, setEdges, nodeIdCounter])
+  }, [setNodes, setEdges, nodeIdCounter, nodes, edges, pushSnapshot])
 
   const handleDelete = useCallback(() => {
     const selectedIds = new Set(
@@ -50,16 +58,20 @@ export function useCanvasKeyboard({
     )
     if (selectedIds.size === 0) return
 
+    pushSnapshot(nodes, edges)
+
     setNodes((nds) => nds.filter((n) => !selectedIds.has(n.id)))
     setEdges((eds) =>
       eds.filter((e) => !selectedIds.has(e.source) && !selectedIds.has(e.target)),
     )
-  }, [nodes, setNodes, setEdges])
+  }, [nodes, edges, setNodes, setEdges, pushSnapshot])
 
   const handleDuplicate = useCallback(() => {
     const selectedNodeIds = nodes.filter((n) => n.selected).map((n) => n.id)
     const copiedData = copyNodes(nodes, edges, selectedNodeIds)
     if (!copiedData) return
+
+    pushSnapshot(nodes, edges)
 
     const { nodes: newNodes, edges: newEdges, newIdCounter } = pasteNodes(
       copiedData,
@@ -72,7 +84,7 @@ export function useCanvasKeyboard({
       [...nds.map((n) => ({ ...n, selected: false })), ...newNodes],
     )
     setEdges((eds) => [...eds, ...newEdges])
-  }, [nodes, edges, setNodes, setEdges, nodeIdCounter])
+  }, [nodes, edges, setNodes, setEdges, nodeIdCounter, pushSnapshot])
 
   const handleSelectAll = useCallback(() => {
     setNodes((nds) => nds.map((n) => ({ ...n, selected: true })))
@@ -105,12 +117,21 @@ export function useCanvasKeyboard({
       } else if (isCtrlOrCmd && event.key === 'a') {
         event.preventDefault()
         handleSelectAll()
+      } else if (isCtrlOrCmd && event.key.toLowerCase() === 'z' && event.shiftKey) {
+        event.preventDefault()
+        redo()
+      } else if (isCtrlOrCmd && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+        event.preventDefault()
+        undo()
+      } else if (isCtrlOrCmd && event.key.toLowerCase() === 'y') {
+        event.preventDefault()
+        redo()
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault()
         handleDelete()
       }
     },
-    [handleCopy, handlePaste, handleDuplicate, handleSelectAll, handleDelete],
+    [handleCopy, handlePaste, handleDuplicate, handleSelectAll, handleDelete, undo, redo],
   )
 
   return {

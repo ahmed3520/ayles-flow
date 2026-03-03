@@ -1,7 +1,6 @@
 import {
   SignedIn,
   SignedOut,
-  SignIn,
   UserButton,
 } from '@clerk/tanstack-react-start'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
@@ -12,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../convex/_generated/api'
 
 import CanvasPreview from '@/components/CanvasPreview'
+import LandingPage from '@/components/LandingPage'
 
 export const Route = createFileRoute('/')({ component: Home })
 
@@ -41,12 +41,12 @@ function ProjectDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-200">
-      <div className="max-w-5xl mx-auto px-6 py-12">
+    <div className="min-h-screen text-zinc-200">
+      <div className="max-w-5xl mx-auto px-6 py-12 min-h-screen">
         {/* Header */}
         <div className="flex items-center justify-between mb-10">
           <div>
-            <h1 className="text-2xl font-bold text-zinc-100">Ayles Flow</h1>
+            <h1 className="font-logo text-[28px] text-white italic">Ayles Flow</h1>
             <p className="text-sm text-zinc-500 mt-1">Your projects</p>
           </div>
           <div className="flex items-center gap-3">
@@ -108,7 +108,7 @@ function ProjectDashboard() {
                     params: { projectId: project._id },
                   })
                 }
-                className="group text-left rounded-2xl bg-zinc-900 border border-zinc-800/60 hover:border-zinc-700/60 hover:bg-zinc-800/50 transition-all overflow-hidden"
+                className="group text-left rounded-2xl bg-zinc-900 border border-zinc-800/60 hover:border-zinc-700/60 hover:bg-zinc-800/50 transition-all overflow-hidden cursor-pointer"
               >
                 {/* Canvas preview thumbnail */}
                 <div className="h-36 bg-zinc-950/60 border-b border-zinc-800/40">
@@ -176,15 +176,13 @@ function Home() {
   const storeUser = useMutation(api.users.store)
 
   return (
-    <div className="min-h-screen bg-zinc-950">
+    <div className="min-h-screen">
       <SignedIn>
         <StoreUser storeUser={storeUser} />
         <ProjectDashboard />
       </SignedIn>
       <SignedOut>
-        <div className="fixed inset-0 flex items-center justify-center bg-zinc-950">
-          <SignIn routing="hash" />
-        </div>
+        <LandingPage />
       </SignedOut>
     </div>
   )

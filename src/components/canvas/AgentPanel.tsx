@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
+  BookOpen,
   Bot,
+  Check,
   ChevronDown,
+  ClipboardCopy,
+  FileText,
   Globe,
+  Layers,
+  Loader2,
   MessageSquarePlus,
+  Search,
   Send,
   Square,
+  Terminal,
   Trash2,
   X,
 } from 'lucide-react'
@@ -31,7 +39,183 @@ type Chat = {
   updatedAt: number
 }
 
-function ActionBadge({ action }: { action: AgentAction }) {
+// --- Tool icon / verb helpers ---
+
+type LucideIcon = typeof FileText
+
+const TOOL_ICON_MAP: Record<string, LucideIcon> = {
+  // File ops
+  read: FileText,
+  write: FileText,
+  edit: FileText,
+  multi_edit: FileText,
+  delete: FileText,
+  mkdir: FileText,
+  move: FileText,
+  create_project_spec: FileText,
+  create_pdf: FileText,
+  // Shell
+  shell: Terminal,
+  create_sandbox: Terminal,
+  run_coding_agent: Terminal,
+  // Search
+  grep: Search,
+  glob: Search,
+  ls: Search,
+  web_search: Search,
+  // Canvas
+  add_node: Layers,
+  connect_nodes: Layers,
+  update_node: Layers,
+  delete_nodes: Layers,
+  clear_canvas: Layers,
+  get_canvas_state: Layers,
+  get_available_models: Layers,
+  // Research
+  deep_research: BookOpen,
+  // Skill
+  load_skill: FileText,
+  workspace_info: Search,
+  lint: FileText,
+  get_preview_url: Globe,
+}
+
+function getToolIcon(tool: string): LucideIcon {
+  return TOOL_ICON_MAP[tool] || Terminal
+}
+
+function stripSandboxPath(s: unknown): string {
+  return String(s || '').replace(/\/home\/user\/app\/?/g, '')
+}
+
+function truncCmd(s: unknown): string {
+  return String(s || '').slice(0, 50)
+}
+
+type ToolLabel = { pending: (a: Record<string, unknown>) => string; done: (a: Record<string, unknown>) => string }
+
+const TOOL_DISPLAY: Record<string, ToolLabel> = {
+  // File ops
+  read:       { pending: (a) => `Reading ${stripSandboxPath(a.path)}`,  done: (a) => `Read ${stripSandboxPath(a.path)}` },
+  write:      { pending: (a) => `Writing ${stripSandboxPath(a.path)}`,  done: (a) => `Wrote ${stripSandboxPath(a.path)}` },
+  edit:       { pending: (a) => `Editing ${stripSandboxPath(a.path)}`,  done: (a) => `Edited ${stripSandboxPath(a.path)}` },
+  multi_edit: { pending: (a) => `Editing ${stripSandboxPath(a.path)}`,  done: (a) => `Edited ${stripSandboxPath(a.path)}` },
+  delete:     { pending: (a) => `Deleting ${stripSandboxPath(a.path)}`, done: (a) => `Deleted ${stripSandboxPath(a.path)}` },
+  mkdir:      { pending: (a) => `Creating ${stripSandboxPath(a.path)}`, done: (a) => `Created ${stripSandboxPath(a.path)}` },
+  move:       { pending: (a) => `Moving ${stripSandboxPath(a.from_path)} → ${stripSandboxPath(a.to_path)}`, done: (a) => `Moved ${stripSandboxPath(a.from_path)} → ${stripSandboxPath(a.to_path)}` },
+  // Shell (unified — action param for output/stop/list)
+  shell:         {
+    pending: (a) => a.action === 'output' ? `Reading output ${a.process_id}`
+      : a.action === 'stop' ? `Stopping ${a.process_id}`
+      : a.action === 'list' ? 'Listing processes'
+      : `Running ${truncCmd(a.command)}`,
+    done: (a) => a.action === 'output' ? `Output ${a.process_id}`
+      : a.action === 'stop' ? `Stopped ${a.process_id}`
+      : a.action === 'list' ? 'Listed processes'
+      : `Ran ${truncCmd(a.command)}`,
+  },
+  // Search
+  grep:       { pending: (a) => `Searching ${a.pattern}`,  done: (a) => `Searched ${a.pattern}` },
+  glob:       { pending: (a) => `Finding ${a.pattern}`,    done: (a) => `Found ${a.pattern}` },
+  ls:         { pending: (a) => `Listing ${stripSandboxPath(a.path || '.')}`, done: (a) => `Listed ${stripSandboxPath(a.path || '.')}` },
+  web_search: { pending: (a) => `Searching ${a.query}`,    done: (a) => `Searched ${a.query}` },
+  // Canvas
+  add_node:           { pending: () => 'Adding node',        done: (a) => `Added ${a.contentType || 'node'}` },
+  update_node:        { pending: () => 'Updating node',      done: (a) => `Updated ${a.nodeId}` },
+  delete_nodes:       { pending: () => 'Deleting nodes',     done: (a) => `Deleted ${(a.nodeIds as string[])?.length || 0} node(s)` },
+  clear_canvas:       { pending: () => 'Clearing canvas',    done: () => 'Cleared canvas' },
+  connect_nodes:      { pending: () => 'Connecting nodes',   done: (a) => `Connected ${a.sourceNodeId} → ${a.targetNodeId}` },
+  get_canvas_state:   { pending: () => 'Inspecting canvas',  done: () => 'Inspected canvas' },
+  get_available_models: { pending: () => 'Loading models',   done: () => 'Loaded models' },
+  // Research / long ops
+  deep_research:      { pending: (a) => `Researching ${a.topic}`,      done: (a) => `Researched ${a.topic}` },
+  create_pdf:         { pending: (a) => `Creating PDF ${a.title}`,     done: (a) => `Created PDF ${a.title}` },
+  create_sandbox:     { pending: () => 'Creating sandbox...',          done: (a) => `Created sandbox ${a.templateName}` },
+  create_project_spec: { pending: () => 'Creating project spec...',     done: () => 'Created project.md' },
+  run_coding_agent:   { pending: () => 'Running coding agent...',      done: () => 'Built project' },
+  // Sub-agent tools
+  lint:            { pending: (a) => `Linting ${stripSandboxPath(a.path)}`,    done: (a) => `Linted ${stripSandboxPath(a.path)}` },
+  workspace_info:  { pending: () => 'Inspecting workspace',                    done: () => 'Inspected workspace' },
+  load_skill:      { pending: (a) => `Loading skill ${a.name}`,               done: (a) => `Loaded skill ${a.name}` },
+  get_preview_url: { pending: (a) => `Getting preview port ${a.port}`,        done: (a) => `Preview port ${a.port}` },
+}
+
+function formatToolLabel(tool: string, args: Record<string, unknown>, status: 'pending' | 'done'): { verb: string; detail: string } {
+  const display = TOOL_DISPLAY[tool]
+  if (!display) return { verb: tool, detail: '' }
+  let label: string
+  try {
+    label = status === 'pending' ? display.pending(args) : display.done(args)
+  } catch {
+    return { verb: tool, detail: '' }
+  }
+  const match = label.match(/^(\S+)\s+(.*)$/)
+  if (match) return { verb: match[1], detail: match[2] }
+  return { verb: label, detail: '' }
+}
+
+// --- Copy button ---
+
+function CopyButton({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Fallback
+    }
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`p-1 rounded text-zinc-600 hover:text-zinc-400 transition-colors ${className || ''}`}
+      title={copied ? 'Copied!' : 'Copy'}
+    >
+      {copied ? <Check size={12} className="text-emerald-500" /> : <ClipboardCopy size={12} />}
+    </button>
+  )
+}
+
+// --- Tool call line (replaces ToolCallBadge) ---
+
+function ToolCallLine({ tool, args, status, error, label: legacyLabel }: { tool: string; args?: Record<string, unknown>; status?: 'pending' | 'done'; error?: boolean; label?: string }) {
+  const Icon = getToolIcon(tool)
+  const s = status || 'done'
+  // Old messages stored in Convex have `label` string, new ones have `args` object
+  const { verb, detail } = args && Object.keys(args).length > 0
+    ? formatToolLabel(tool, args, s)
+    : legacyLabel
+      ? (() => { const m = legacyLabel.match(/^(\S+):?\s+(.*)$/); return m ? { verb: m[1].replace(/:$/, ''), detail: stripSandboxPath(m[2]) } : { verb: legacyLabel, detail: '' } })()
+      : { verb: tool, detail: '' }
+
+  return (
+    <div className="flex items-center gap-1.5 py-0.5 text-xs group/tc">
+      {s === 'pending' ? (
+        <Loader2 size={13} className="text-blue-400/60 animate-spin shrink-0" />
+      ) : error ? (
+        <X size={13} className="text-red-400 shrink-0" />
+      ) : (
+        <Check size={13} className="text-zinc-500 shrink-0" />
+      )}
+      <span className={`font-medium shrink-0 ${error ? 'text-red-400' : 'text-zinc-300'}`}>{verb}</span>
+      <Icon size={12} className="text-zinc-500 shrink-0" />
+      {detail && (
+        <span className="text-zinc-400 font-mono truncate">{detail}</span>
+      )}
+      {s !== 'pending' && detail && (
+        <CopyButton text={detail} className="opacity-0 group-hover/tc:opacity-100 ml-auto" />
+      )}
+    </div>
+  )
+}
+
+// --- Action line (replaces ActionBadge) ---
+
+function ActionLine({ action }: { action: AgentAction }) {
   const labels: Record<AgentAction['type'], (a: AgentAction) => string> = {
     add_node: (a) =>
       `Added ${(a as { contentType: string }).contentType} node`,
@@ -43,25 +227,55 @@ function ActionBadge({ action }: { action: AgentAction }) {
     delete_nodes: (a) =>
       `Deleted ${(a as { nodeIds: Array<string> }).nodeIds.length} node(s)`,
     clear_canvas: () => 'Cleared canvas',
-    create_pdf: (a) => `Created PDF: ${(a as CreatePdfAction).title}`,
+    create_pdf: (a) => `Created PDF ${(a as CreatePdfAction).title}`,
   }
 
+  const label = labels[action.type](action)
+  const match = label.match(/^(\S+)\s+(.*)$/)
+  const verb = match ? match[1] : label
+  const detail = match ? match[2] : ''
+
   return (
-    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800 border border-zinc-700/50 text-xs text-zinc-400">
-      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/70 shrink-0" />
-      {labels[action.type](action)}
+    <div className="flex items-center gap-1.5 py-0.5 text-xs group/ac">
+      <Check size={13} className="text-emerald-500/70 shrink-0" />
+      <span className="text-zinc-300 font-medium shrink-0">{verb}</span>
+      <Layers size={12} className="text-zinc-500 shrink-0" />
+      {detail && (
+        <span className="text-zinc-400 font-mono truncate">{detail}</span>
+      )}
     </div>
   )
 }
 
-function ToolCallBadge({ label }: { label: string }) {
+// --- Reasoning block (collapsible) ---
+
+function ReasoningBlock({ content }: { content: string }) {
+  const [open, setOpen] = useState(false)
+
   return (
-    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-800/60 border border-zinc-700/30 text-xs text-zinc-500">
-      <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 shrink-0" />
-      {label}
+    <div className="rounded-lg border border-zinc-700/40 bg-zinc-800/40 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 w-full px-2.5 py-1.5 text-xs text-zinc-500 hover:text-zinc-400 transition-colors"
+      >
+        <ChevronDown
+          size={12}
+          className={`shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+        />
+        <span className="font-medium">Thinking</span>
+        <span className="text-zinc-600 ml-auto">{content.length.toLocaleString()} chars</span>
+      </button>
+      {open && (
+        <div className="px-2.5 pb-2 text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-y-auto border-t border-zinc-700/30">
+          {content}
+        </div>
+      )}
     </div>
   )
 }
+
+// --- Resource cards ---
 
 function ResourceCards({
   sources,
@@ -69,7 +283,7 @@ function ResourceCards({
   sources: Array<{ title: string; url: string }>
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1">
       <span className="text-[11px] text-zinc-500 font-medium uppercase tracking-wider">
         Sources
       </span>
@@ -80,23 +294,10 @@ function ResourceCards({
             href={source.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/80 border border-zinc-700/40 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors max-w-full"
+            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-800/80 border border-zinc-700/40 text-xs text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-colors max-w-full"
             title={source.url}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="shrink-0 text-zinc-500"
-            >
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
+            <Globe size={10} className="shrink-0 text-zinc-600" />
             <span className="truncate">{source.title}</span>
           </a>
         ))}
@@ -105,6 +306,8 @@ function ResourceCards({
   )
 }
 
+// --- Message parts renderer ---
+
 function MessageParts({
   parts,
   isAnimating,
@@ -112,34 +315,57 @@ function MessageParts({
   parts: Array<MessagePart>
   isAnimating: boolean
 }) {
+  // Group consecutive tool_call + action parts into compact blocks
+  const groups: Array<{ type: 'tools'; items: Array<MessagePart> } | MessagePart> = []
+  for (const part of parts) {
+    if (part.type === 'tool_call' || part.type === 'action') {
+      const last = groups.at(-1)
+      if (last && 'type' in last && last.type === 'tools') {
+        last.items.push(part)
+      } else {
+        groups.push({ type: 'tools', items: [part] })
+      }
+    } else {
+      groups.push(part)
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-2.5">
-      {parts.map((part, i) => {
+    <div className="flex flex-col gap-1.5">
+      {groups.map((group, i) => {
+        if ('type' in group && group.type === 'tools') {
+          return (
+            <div key={i} className="flex flex-col">
+              {group.items.map((item, j) => {
+                if (item.type === 'tool_call') {
+                  return <ToolCallLine key={j} tool={item.tool} args={item.args} status={item.status || 'done'} error={item.error} label={(item as any).label} />
+                }
+                if (item.type === 'action') {
+                  return <ActionLine key={j} action={item.action} />
+                }
+                return null
+              })}
+            </div>
+          )
+        }
+
+        const part = group as MessagePart
         switch (part.type) {
           case 'text':
             return part.content ? (
               <Streamdown
                 key={i}
+                className="agent-markdown"
                 mode={
-                  isAnimating && i === parts.length - 1 ? 'streaming' : 'static'
+                  isAnimating && i === groups.length - 1 ? 'streaming' : 'static'
                 }
                 plugins={streamdownPlugins}
               >
                 {part.content}
               </Streamdown>
             ) : null
-          case 'tool_call':
-            return (
-              <div key={i} className="flex flex-wrap gap-1.5">
-                <ToolCallBadge label={part.label} />
-              </div>
-            )
-          case 'action':
-            return (
-              <div key={i} className="flex flex-wrap gap-1.5">
-                <ActionBadge action={part.action} />
-              </div>
-            )
+          case 'reasoning':
+            return <ReasoningBlock key={i} content={part.content} />
           case 'resources':
             return <ResourceCards key={i} sources={part.sources} />
           default:
@@ -149,6 +375,8 @@ function MessageParts({
     </div>
   )
 }
+
+// --- Message bubble ---
 
 function MessageBubble({
   message,
@@ -163,10 +391,10 @@ function MessageBubble({
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+        className={`max-w-[92%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
           isUser
             ? 'bg-zinc-800 text-zinc-200 border border-zinc-700/50'
-            : 'bg-zinc-850 text-zinc-300 border border-zinc-800'
+            : 'text-zinc-300'
         }`}
       >
         {isUser ? (
@@ -177,19 +405,20 @@ function MessageBubble({
           <MessageParts parts={message.parts!} isAnimating={isAnimating} />
         ) : message.content ? (
           <Streamdown
+            className="agent-markdown"
             mode={isAnimating ? 'streaming' : 'static'}
             plugins={streamdownPlugins}
           >
             {message.content}
           </Streamdown>
         ) : (
-          <span className="text-zinc-600 italic">Thinking...</span>
+          <span className="text-zinc-600 italic text-xs">Thinking...</span>
         )}
         {/* Fallback: show actions at bottom for old messages without parts */}
         {!hasParts && message.actions && message.actions.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
+          <div className="flex flex-col mt-2">
             {message.actions.map((action, i) => (
-              <ActionBadge key={i} action={action} />
+              <ActionLine key={i} action={action} />
             ))}
           </div>
         )}
@@ -197,6 +426,8 @@ function MessageBubble({
     </div>
   )
 }
+
+// --- Chat list ---
 
 function formatTime(ts: number) {
   const d = new Date(ts)
@@ -227,24 +458,24 @@ function ChatListView({
     <div className="flex-1 overflow-y-auto">
       {chats.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-full text-center px-6">
-          <Bot size={36} className="text-zinc-700 mb-4" />
-          <p className="text-sm text-zinc-500 leading-relaxed">
+          <Bot size={32} className="text-zinc-700 mb-3" />
+          <p className="text-xs text-zinc-500 leading-relaxed">
             No conversations yet. Start a new chat to begin.
           </p>
           <button
             onClick={onNew}
-            className="mt-4 flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-300 bg-zinc-800 border border-zinc-700/50 rounded-xl hover:bg-zinc-700 transition-colors"
+            className="mt-3 flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 bg-zinc-800 border border-zinc-700/50 rounded-xl hover:bg-zinc-700 transition-colors"
           >
-            <MessageSquarePlus size={16} />
+            <MessageSquarePlus size={14} />
             New chat
           </button>
         </div>
       ) : (
-        <div className="p-2 space-y-1">
+        <div className="p-2 space-y-0.5">
           {chats.map((chat) => (
             <div
               key={chat._id}
-              className={`group flex items-center gap-2 px-3 py-2.5 rounded-xl cursor-pointer transition-colors ${
+              className={`group flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-colors ${
                 chat._id === activeChatId
                   ? 'bg-zinc-800 text-zinc-200'
                   : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300'
@@ -252,8 +483,8 @@ function ChatListView({
               onClick={() => onSelect(chat._id)}
             >
               <div className="flex-1 min-w-0">
-                <div className="text-sm truncate">{chat.title}</div>
-                <div className="text-xs text-zinc-600 mt-0.5">
+                <div className="text-xs truncate">{chat.title}</div>
+                <div className="text-[10px] text-zinc-600 mt-0.5">
                   {formatTime(chat.updatedAt)}
                 </div>
               </div>
@@ -265,7 +496,7 @@ function ChatListView({
                 className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-700/50 transition-all"
                 title="Delete chat"
               >
-                <Trash2 size={14} />
+                <Trash2 size={12} />
               </button>
             </div>
           ))}
@@ -274,6 +505,8 @@ function ChatListView({
     </div>
   )
 }
+
+// --- Main panel ---
 
 interface AgentPanelProps {
   messages: Array<ChatMessage>
@@ -362,40 +595,40 @@ export default function AgentPanel({
   return (
     <div className="absolute right-4 top-4 bottom-4 z-20 w-96 flex flex-col bg-zinc-900 rounded-2xl border border-zinc-800 shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-        <div className="flex items-center gap-2.5">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+        <div className="flex items-center gap-2">
           {showChatList ? (
             <button
               onClick={() => setShowChatList(false)}
               className="p-1 -ml-1 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
             >
-              <ArrowLeft size={18} />
+              <ArrowLeft size={16} />
             </button>
           ) : (
-            <Bot size={18} className="text-zinc-400" />
+            <Bot size={16} className="text-zinc-400" />
           )}
-          <h2 className="text-base font-semibold text-zinc-200">
+          <h2 className="text-sm font-semibold text-zinc-200">
             {showChatList ? 'History' : 'Agent'}
           </h2>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           {!showChatList && (
             <>
               <button
                 onClick={handleNewChat}
-                className="p-2 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
+                className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
                 title="New chat"
               >
-                <MessageSquarePlus size={16} />
+                <MessageSquarePlus size={14} />
               </button>
               <button
                 onClick={() => setShowChatList(true)}
-                className="relative p-2 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
+                className="relative p-1.5 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
                 title="Chat history"
               >
                 <svg
-                  width="16"
-                  height="16"
+                  width="14"
+                  height="14"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -407,34 +640,34 @@ export default function AgentPanel({
                   <polyline points="12 6 12 12 16 14" />
                 </svg>
                 {chats.length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-zinc-700 text-[10px] text-zinc-300 flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-zinc-700 text-[9px] text-zinc-300 flex items-center justify-center">
                     {chats.length}
                   </span>
                 )}
               </button>
               <button
                 onClick={onClear}
-                className="p-2 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
+                className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
                 title="Clear chat"
               >
-                <Trash2 size={16} />
+                <Trash2 size={14} />
               </button>
             </>
           )}
           {showChatList && (
             <button
               onClick={handleNewChat}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded-lg border border-zinc-700/50 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 rounded-lg border border-zinc-700/50 transition-colors"
             >
-              <MessageSquarePlus size={14} />
+              <MessageSquarePlus size={12} />
               New
             </button>
           )}
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
           >
-            <X size={16} />
+            <X size={14} />
           </button>
         </div>
       </div>
@@ -450,15 +683,15 @@ export default function AgentPanel({
       ) : (
         <>
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center px-6">
-                <Bot size={36} className="text-zinc-700 mb-4" />
-                <p className="text-sm text-zinc-500 leading-relaxed">
+              <div className="flex flex-col items-center justify-center h-full text-center px-5">
+                <Bot size={32} className="text-zinc-700 mb-3" />
+                <p className="text-xs text-zinc-500 leading-relaxed">
                   Ask me to build workflows on your canvas. I can add nodes,
                   pick models, wire connections, and set prompts.
                 </p>
-                <div className="flex flex-wrap gap-2 mt-5 justify-center">
+                <div className="flex flex-wrap gap-1.5 mt-4 justify-center">
                   {[
                     'Build an image generation pipeline',
                     'Add a video node with a sunset prompt',
@@ -467,7 +700,7 @@ export default function AgentPanel({
                     <button
                       key={suggestion}
                       onClick={() => onSend(suggestion)}
-                      className="px-3 py-2 text-xs text-zinc-500 bg-zinc-800/60 border border-zinc-700/40 rounded-xl hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+                      className="px-2.5 py-1.5 text-[11px] text-zinc-500 bg-zinc-800/60 border border-zinc-700/40 rounded-lg hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
                     >
                       {suggestion}
                     </button>
@@ -477,9 +710,9 @@ export default function AgentPanel({
                       setResearchMode(true)
                       inputRef.current?.focus()
                     }}
-                    className="px-3 py-2 text-xs text-blue-400/70 bg-blue-500/5 border border-blue-500/20 rounded-xl hover:bg-blue-500/10 hover:text-blue-300 transition-colors flex items-center gap-1.5"
+                    className="px-2.5 py-1.5 text-[11px] text-blue-400/70 bg-blue-500/5 border border-blue-500/20 rounded-lg hover:bg-blue-500/10 hover:text-blue-300 transition-colors flex items-center gap-1"
                   >
-                    <Globe size={12} />
+                    <Globe size={10} />
                     Deep Research
                   </button>
                 </div>
@@ -497,8 +730,8 @@ export default function AgentPanel({
               />
             ))}
             {toolStatus && isStreaming && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-800/50 border border-zinc-700/30 text-xs text-zinc-500">
-                <div className="w-2 h-2 rounded-full bg-blue-500/60 animate-pulse shrink-0" />
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/30 text-xs text-zinc-400">
+                <Loader2 size={12} className="text-blue-500/60 animate-spin shrink-0" />
                 <span className="truncate">{toolStatus}</span>
               </div>
             )}
@@ -506,22 +739,22 @@ export default function AgentPanel({
           </div>
 
           {/* Input */}
-          <div className="px-4 pb-4 pt-2">
+          <div className="px-3 pb-3 pt-1.5">
             {researchMode && (
-              <div className="flex items-center gap-2 mb-2 px-1">
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-400">
-                  <Globe size={12} />
+              <div className="flex items-center gap-2 mb-1.5 px-1">
+                <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-400">
+                  <Globe size={10} />
                   Deep Research
                 </div>
                 <button
                   onClick={() => setResearchMode(false)}
-                  className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+                  className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors"
                 >
                   Cancel
                 </button>
               </div>
             )}
-            <div className={`bg-zinc-800/60 border rounded-xl px-4 pt-3 pb-2 ${researchMode ? 'border-blue-500/30' : 'border-zinc-700/40'}`}>
+            <div className={`bg-zinc-800/60 border rounded-xl px-3 pt-2.5 pb-1.5 ${researchMode ? 'border-blue-500/30' : 'border-zinc-700/40'}`}>
               <div className="flex items-end gap-2">
                 <textarea
                   ref={inputRef}
@@ -530,73 +763,80 @@ export default function AgentPanel({
                   onKeyDown={handleKeyDown}
                   placeholder={researchMode ? 'Enter a topic to research in depth...' : 'Tell the agent what to build...'}
                   rows={1}
-                  className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 resize-none outline-none max-h-28 scrollbar-none"
+                  className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 resize-none outline-none max-h-24 scrollbar-none"
                   style={{
                     height: 'auto',
-                    minHeight: '24px',
+                    minHeight: '20px',
                   }}
                   onInput={(e) => {
                     const target = e.target as HTMLTextAreaElement
                     target.style.height = 'auto'
                     target.style.height =
-                      Math.min(target.scrollHeight, 112) + 'px'
+                      Math.min(target.scrollHeight, 96) + 'px'
                   }}
                 />
                 {isStreaming ? (
                   <button
                     onClick={onStop}
-                    className="p-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors shrink-0"
+                    className="p-1.5 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors shrink-0"
                     title="Stop"
                   >
-                    <Square size={16} />
+                    <Square size={14} />
                   </button>
                 ) : (
                   <button
                     onClick={handleSend}
                     disabled={!input.trim()}
-                    className="p-2 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+                    className="p-1.5 rounded-lg bg-zinc-700 text-zinc-300 hover:bg-zinc-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
                     title="Send"
                   >
-                    <Send size={16} />
+                    <Send size={14} />
                   </button>
                 )}
               </div>
-              <div className="relative mt-1.5 flex items-center gap-2">
+              <div className="relative mt-1 flex items-center gap-2">
                 <button
                   onClick={() => setShowModelPicker(!showModelPicker)}
-                  className="flex items-center gap-1.5 px-1 py-0.5 text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors rounded"
+                  className="flex items-center gap-1 px-1 py-0.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors rounded"
                 >
                   <span>{currentModelName}</span>
-                  <ChevronDown size={10} />
+                  <ChevronDown size={9} />
                 </button>
                 <button
                   onClick={() => setResearchMode(!researchMode)}
-                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[11px] rounded transition-colors ${
+                  className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ${
                     researchMode
                       ? 'text-blue-400 bg-blue-500/10'
                       : 'text-zinc-600 hover:text-zinc-400'
                   }`}
                   title="Toggle deep research mode"
                 >
-                  <Globe size={11} />
+                  <Globe size={10} />
                   <span>Research</span>
                 </button>
                 {showModelPicker && (
-                  <div className="absolute left-0 bottom-full mb-1 w-56 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-30 overflow-hidden">
+                  <div className="absolute left-0 bottom-full mb-1 w-52 bg-zinc-800 border border-zinc-700 rounded-xl shadow-xl z-30 overflow-hidden">
                     {AGENT_MODELS.map((m) => (
                       <button
                         key={m.id}
+                        disabled={m.comingSoon}
                         onClick={() => {
+                          if (m.comingSoon) return
                           onModelChange(m.id)
                           setShowModelPicker(false)
                         }}
-                        className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
-                          m.id === agentModel
-                            ? 'bg-zinc-700/50 text-zinc-200'
-                            : 'text-zinc-400 hover:bg-zinc-700/30 hover:text-zinc-200'
+                        className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
+                          m.comingSoon
+                            ? 'text-zinc-600 cursor-not-allowed'
+                            : m.id === agentModel
+                              ? 'bg-zinc-700/50 text-zinc-200'
+                              : 'text-zinc-400 hover:bg-zinc-700/30 hover:text-zinc-200'
                         }`}
                       >
                         {m.name}
+                        {m.comingSoon && (
+                          <span className="text-[9px] text-zinc-600 font-medium">Coming soon</span>
+                        )}
                       </button>
                     ))}
                   </div>

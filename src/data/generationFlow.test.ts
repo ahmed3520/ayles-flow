@@ -49,6 +49,11 @@ function createMockDeps(
     createGeneration: vi.fn().mockResolvedValue('gen-abc-123'),
     submitToFal: vi.fn().mockResolvedValue({ requestId: 'fal-req-456' }),
     setFalRequestId: vi.fn().mockResolvedValue(undefined),
+    submitToOpenRouter: vi.fn().mockImplementation(async ({ onDelta }) => {
+      onDelta('Generated text response')
+      return { text: 'Generated text response', usage: { inputTokens: 100, outputTokens: 50 } }
+    }),
+    completeTextGeneration: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -99,6 +104,7 @@ describe('executeGeneration — happy path', () => {
       generationStatus: 'generating',
       generationId: undefined,
       resultUrl: undefined,
+      resultText: undefined,
       imageWidth: undefined,
       imageHeight: undefined,
       errorMessage: undefined,
@@ -150,6 +156,152 @@ describe('executeGeneration — happy path', () => {
 
     expect(createOrder).toBeLessThan(submitOrder)
     expect(submitOrder).toBeLessThan(linkOrder)
+  })
+})
+
+// ── OpenRouter text generation ──────────────────────────────────────────────
+
+describe('executeGeneration — OpenRouter text generation', () => {
+  it('routes text content type to OpenRouter instead of FAL', async () => {
+    const node = makeNode('node-1', {
+      contentType: 'text',
+      prompt: 'Write a poem about space',
+      model: 'anthropic/claude-sonnet-4.5',
+    })
+    const deps = createMockDeps([node])
+    const callbacks = createMockCallbacks()
+
+    const result = await executeGeneration('node-1', deps, callbacks)
+
+    expect(result).toBe(true)
+    expect(deps.submitToOpenRouter).toHaveBeenCalledWith({
+      data: {
+        model: 'anthropic/claude-sonnet-4.5',
+        prompt: 'Write a poem about space',
+      },
+      onDelta: expect.any(Function),
+    })
+    expect(deps.submitToFal).not.toHaveBeenCalled()
+    expect(deps.setFalRequestId).not.toHaveBeenCalled()
+  })
+
+  it('calls completeTextGeneration with the generated text', async () => {
+    const node = makeNode('node-1', {
+      contentType: 'text',
+      prompt: 'Hello',
+      model: 'google/gemini-3-flash-preview',
+    })
+    const deps = createMockDeps([node])
+    const callbacks = createMockCallbacks()
+
+    await executeGeneration('node-1', deps, callbacks)
+
+    expect(deps.completeTextGeneration).toHaveBeenCalledWith({
+      generationId: 'gen-abc-123',
+      resultText: 'Generated text response',
+      inputTokens: 100,
+      outputTokens: 50,
+    })
+  })
+
+  it('streams text deltas via onDelta callback', async () => {
+    const node = makeNode('node-1', {
+      contentType: 'text',
+      prompt: 'Hello',
+      model: 'google/gemini-3-flash-preview',
+    })
+    const deltas: string[] = []
+    const deps = createMockDeps([node], [], {
+      submitToOpenRouter: vi.fn().mockImplementation(async ({ onDelta }) => {
+        onDelta('Hello')
+        onDelta('Hello world')
+        deltas.push('tracked')
+        return { text: 'Hello world', usage: { inputTokens: 10, outputTokens: 20 } }
+      }),
+    })
+    const callbacks = createMockCallbacks()
+
+    await executeGeneration('node-1', deps, callbacks)
+
+    // onDelta should have caused onUpdate calls with progressive resultText
+    const textUpdates = callbacks.updates.filter((u) => u.resultText !== undefined && !u.generationStatus)
+    expect(textUpdates.length).toBe(2)
+    expect(textUpdates[0].resultText).toBe('Hello')
+    expect(textUpdates[1].resultText).toBe('Hello world')
+  })
+
+  it('updates node with completed status and resultText', async () => {
+    const node = makeNode('node-1', {
+      contentType: 'text',
+      prompt: 'Hello',
+      model: 'google/gemini-3-flash-preview',
+    })
+    const deps = createMockDeps([node])
+    const callbacks = createMockCallbacks()
+
+    await executeGeneration('node-1', deps, callbacks)
+
+    const completedUpdate = callbacks.updates.find(
+      (u) => u.generationStatus === 'completed',
+    )
+    expect(completedUpdate).toEqual({
+      generationStatus: 'completed',
+      resultText: 'Generated text response',
+    })
+  })
+
+  it('sets error status when submitToOpenRouter fails', async () => {
+    const node = makeNode('node-1', {
+      contentType: 'text',
+      prompt: 'Hello',
+      model: 'anthropic/claude-sonnet-4.5',
+    })
+    const deps = createMockDeps([node], [], {
+      submitToOpenRouter: vi.fn().mockRejectedValue(new Error('OpenRouter API error')),
+    })
+    const callbacks = createMockCallbacks()
+
+    const result = await executeGeneration('node-1', deps, callbacks)
+
+    expect(result).toBe(false)
+    const errorUpdate = callbacks.updates.find((u) => u.generationStatus === 'error')
+    expect(errorUpdate).toBeDefined()
+    expect(errorUpdate!.errorMessage).toBe('OpenRouter API error')
+  })
+
+  it('does not call completeTextGeneration if submitToOpenRouter fails', async () => {
+    const node = makeNode('node-1', {
+      contentType: 'text',
+      prompt: 'Hello',
+      model: 'anthropic/claude-sonnet-4.5',
+    })
+    const deps = createMockDeps([node], [], {
+      submitToOpenRouter: vi.fn().mockRejectedValue(new Error('fail')),
+    })
+    const callbacks = createMockCallbacks()
+
+    await executeGeneration('node-1', deps, callbacks)
+
+    expect(deps.completeTextGeneration).not.toHaveBeenCalled()
+  })
+
+  it('works for all text models', async () => {
+    for (const model of [
+      'anthropic/claude-sonnet-4.5',
+      'openai/gpt-5.2',
+      'google/gemini-3-flash-preview',
+    ]) {
+      const node = makeNode('node-1', {
+        contentType: 'text',
+        prompt: 'test',
+        model,
+      })
+      const deps = createMockDeps([node])
+      const callbacks = createMockCallbacks()
+      const result = await executeGeneration('node-1', deps, callbacks)
+      expect(result).toBe(true)
+      expect(deps.submitToOpenRouter).toHaveBeenCalled()
+    }
   })
 })
 
@@ -227,7 +379,7 @@ describe('executeGeneration — validation', () => {
     expect(result).toBe(false)
   })
 
-  it('returns false for non-FAL content types (note)', async () => {
+  it('returns false for non-generatable content types (note)', async () => {
     const node = makeNode('node-1', { contentType: 'note' })
     const deps = createMockDeps([node])
     const callbacks = createMockCallbacks()
@@ -235,7 +387,7 @@ describe('executeGeneration — validation', () => {
     expect(result).toBe(false)
   })
 
-  it('returns false for non-FAL content types (ticket)', async () => {
+  it('returns false for non-generatable content types (ticket)', async () => {
     const node = makeNode('node-1', { contentType: 'ticket' })
     const deps = createMockDeps([node])
     const callbacks = createMockCallbacks()
@@ -278,6 +430,18 @@ describe('executeGeneration — validation', () => {
       const result = await executeGeneration('node-1', deps, callbacks)
       expect(result).toBe(true)
     }
+  })
+
+  it('works for text content type via OpenRouter', async () => {
+    const node = makeNode('node-1', {
+      contentType: 'text',
+      prompt: 'test',
+      model: 'anthropic/claude-sonnet-4.5',
+    })
+    const deps = createMockDeps([node])
+    const callbacks = createMockCallbacks()
+    const result = await executeGeneration('node-1', deps, callbacks)
+    expect(result).toBe(true)
   })
 })
 

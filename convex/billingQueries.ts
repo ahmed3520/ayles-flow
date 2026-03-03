@@ -26,8 +26,8 @@ export const getSubscription = query({
 
     return {
       plan: user.plan ?? 'free',
-      credits: user.credits ?? 1.0,
-      creditsLimit: user.creditsLimit ?? 1.0,
+      credits: user.credits ?? 10,
+      creditsLimit: user.creditsLimit ?? 10,
       subscriptionStatus: user.subscriptionStatus ?? null,
       currentPeriodEnd: user.currentPeriodEnd ?? null,
       polarCustomerId: user.polarCustomerId ?? null,

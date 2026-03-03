@@ -1,8 +1,16 @@
 import type { Edge, Node } from '@xyflow/react'
 
 import type { BlockNodeData } from '@/types/nodes'
-import { FAL_CONTENT_TYPES } from '@/types/nodes'
+import {
+  GENERATABLE_CONTENT_TYPES,
+  OPENROUTER_CONTENT_TYPES,
+} from '@/types/nodes'
 import { resolveConnectedInputs } from '@/utils/canvasUtils'
+
+export type TokenUsage = {
+  inputTokens: number
+  outputTokens: number
+}
 
 export type GenerationDeps = {
   getNode: (id: string) => Node | undefined
@@ -26,6 +34,16 @@ export type GenerationDeps = {
     id: string
     falRequestId: string
   }) => Promise<void>
+  submitToOpenRouter: (args: {
+    data: { model: string; prompt: string }
+    onDelta: (accumulatedText: string) => void
+  }) => Promise<{ text: string; usage: TokenUsage }>
+  completeTextGeneration: (args: {
+    generationId: string
+    resultText: string
+    inputTokens: number
+    outputTokens: number
+  }) => Promise<void>
 }
 
 export type GenerationCallbacks = {
@@ -35,7 +53,35 @@ export type GenerationCallbacks = {
 }
 
 /**
- * Core generation pipeline extracted from Canvas.handleGenerate.
+ * Checks if any incoming media connections (image, video, audio) point to
+ * source nodes that haven't completed generation yet (no resultUrl).
+ * Returns info about missing upstream nodes so we can show a clear error.
+ */
+function getMissingUpstreamInputs(
+  nodeId: string,
+  edges: Edge[],
+  getNode: (id: string) => Node | undefined,
+): Array<{ id: string; label: string }> {
+  const missing: Array<{ id: string; label: string }> = []
+
+  for (const edge of edges) {
+    if (edge.target !== nodeId || !edge.targetHandle) continue
+    const inputType = edge.targetHandle.replace('input-', '')
+    if (inputType === 'text') continue // text inputs use prompt, not resultUrl
+    const srcNode = getNode(edge.source)
+    if (!srcNode) continue
+    const srcData = srcNode.data as BlockNodeData
+    if (!srcData.resultUrl) {
+      missing.push({ id: srcNode.id, label: srcData.label || srcNode.id })
+    }
+  }
+
+  return missing
+}
+
+/**
+ * Core generation pipeline.
+ * Routes to FAL for media types and OpenRouter (streaming) for text types.
  * Returns true if generation was initiated, false if it was skipped.
  */
 export async function executeGeneration(
@@ -48,7 +94,7 @@ export async function executeGeneration(
 
   const blockData = sourceNode.data as BlockNodeData
 
-  if (!FAL_CONTENT_TYPES.includes(blockData.contentType)) return false
+  if (!GENERATABLE_CONTENT_TYPES.includes(blockData.contentType)) return false
 
   const connectedInputs = resolveConnectedInputs(
     sourceNodeId,
@@ -58,12 +104,29 @@ export async function executeGeneration(
   const effectivePrompt = connectedInputs['text'] || blockData.prompt
   if (!effectivePrompt.trim()) return false
 
+  // Check for incoming media connections whose source nodes haven't generated yet.
+  // Without this, FAL rejects the request with "image_url: field required" etc.
+  const missingUpstream = getMissingUpstreamInputs(
+    sourceNodeId,
+    deps.edges,
+    deps.getNode,
+  )
+  if (missingUpstream.length > 0) {
+    const names = missingUpstream.map((m) => `"${m.label}"`).join(', ')
+    callbacks.onUpdate({
+      generationStatus: 'error',
+      errorMessage: `Generate ${names} first — this node needs ${missingUpstream.length === 1 ? 'its' : 'their'} output as input.`,
+    })
+    return false
+  }
+
   callbacks.onLock()
 
   callbacks.onUpdate({
     generationStatus: 'generating',
     generationId: undefined,
     resultUrl: undefined,
+    resultText: undefined,
     imageWidth: undefined,
     imageHeight: undefined,
     errorMessage: undefined,
@@ -78,21 +141,47 @@ export async function executeGeneration(
 
     callbacks.onUpdate({ generationId })
 
-    const { requestId } = await deps.submitToFal({
-      data: {
-        model: blockData.model,
-        prompt: effectivePrompt,
-        contentType: blockData.contentType,
-        imageUrl: connectedInputs['image'],
-        audioUrl: connectedInputs['audio'],
-        videoUrl: connectedInputs['video'],
-      },
-    })
+    if (OPENROUTER_CONTENT_TYPES.includes(blockData.contentType)) {
+      // Text generation via OpenRouter — streaming with token-based billing
+      const { text, usage } = await deps.submitToOpenRouter({
+        data: {
+          model: blockData.model,
+          prompt: effectivePrompt,
+        },
+        onDelta: (accumulatedText) => {
+          callbacks.onUpdate({ resultText: accumulatedText })
+        },
+      })
 
-    await deps.setFalRequestId({
-      id: generationId,
-      falRequestId: requestId,
-    })
+      await deps.completeTextGeneration({
+        generationId,
+        resultText: text,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+      })
+
+      callbacks.onUpdate({
+        generationStatus: 'completed',
+        resultText: text,
+      })
+    } else {
+      // Media generation via FAL — async with webhook
+      const { requestId } = await deps.submitToFal({
+        data: {
+          model: blockData.model,
+          prompt: effectivePrompt,
+          contentType: blockData.contentType,
+          imageUrl: connectedInputs['image'],
+          audioUrl: connectedInputs['audio'],
+          videoUrl: connectedInputs['video'],
+        },
+      })
+
+      await deps.setFalRequestId({
+        id: generationId,
+        falRequestId: requestId,
+      })
+    }
 
     return true
   } catch (error) {

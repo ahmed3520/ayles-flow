@@ -23,8 +23,8 @@ export const store = mutation({
       if (existing.plan === undefined) {
         const now = Date.now()
         updates.plan = 'free'
-        updates.credits = 1.0
-        updates.creditsLimit = 1.0
+        updates.credits = 10
+        updates.creditsLimit = 10
         updates.currentPeriodStart = now
         updates.currentPeriodEnd = now + 30 * 24 * 60 * 60 * 1000
       }
@@ -39,8 +39,8 @@ export const store = mutation({
       name: identity.name,
       imageUrl: identity.pictureUrl,
       plan: 'free',
-      credits: 1.0,
-      creditsLimit: 1.0,
+      credits: 10,
+      creditsLimit: 10,
       currentPeriodStart: now,
       currentPeriodEnd: now + 30 * 24 * 60 * 60 * 1000,
     })

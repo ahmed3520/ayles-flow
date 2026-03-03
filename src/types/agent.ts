@@ -11,6 +11,8 @@ export type AddNodeAction = {
   label?: string
   x: number
   y: number
+  previewUrl?: string
+  sandboxId?: string
 }
 
 export type ConnectNodesAction = {
@@ -58,14 +60,19 @@ export type AgentAction =
 // --- Message Parts (ordered segments within an assistant message) ---
 
 export type TextPart = { type: 'text'; content: string }
+export type ReasoningPart = { type: 'reasoning'; content: string }
 export type ActionPart = { type: 'action'; action: AgentAction }
-export type ToolCallPart = { type: 'tool_call'; tool: string; label: string }
+export type ToolCallPart = { type: 'tool_call'; tool: string; args: Record<string, unknown>; status?: 'pending' | 'done'; error?: boolean }
 export type ResourcesPart = {
   type: 'resources'
   sources: Array<{ title: string; url: string }>
 }
-
-export type MessagePart = TextPart | ActionPart | ToolCallPart | ResourcesPart
+export type MessagePart =
+  | TextPart
+  | ReasoningPart
+  | ActionPart
+  | ToolCallPart
+  | ResourcesPart
 
 // --- Chat Messages ---
 
@@ -90,15 +97,27 @@ export type ActionEvent = {
   action: AgentAction
 }
 
+export type ToolStartEvent = {
+  type: 'tool_start'
+  tool: string
+  args: Record<string, unknown>
+}
+
 export type ToolCallEvent = {
   type: 'tool_call'
   tool: string
-  label: string
+  args: Record<string, unknown>
+  error?: boolean
 }
 
 export type ResourcesEvent = {
   type: 'resources'
   sources: Array<{ title: string; url: string }>
+}
+
+export type ReasoningEvent = {
+  type: 'reasoning'
+  content: string
 }
 
 export type DoneEvent = {
@@ -118,7 +137,9 @@ export type ToolStatusEvent = {
 
 export type StreamEvent =
   | TextDeltaEvent
+  | ReasoningEvent
   | ActionEvent
+  | ToolStartEvent
   | ToolCallEvent
   | ResourcesEvent
   | ToolStatusEvent
@@ -164,4 +185,5 @@ export type AgentChatInput = {
   }
   models: Array<AvailableModel>
   agentModel?: string
+  projectId: string
 }

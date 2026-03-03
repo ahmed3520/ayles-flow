@@ -59,14 +59,14 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
     function: {
       name: 'add_node',
       description:
-        'Add a new node to the canvas. Use this to create generation blocks (image, video, audio, music) or utility blocks (text, note).',
+        'Add a new node to the canvas. Use this to create generation blocks (image, video, audio, music), utility blocks (text, note), or a website preview node (website).',
       parameters: {
         type: 'object',
         properties: {
           contentType: {
             type: 'string',
-            enum: ['image', 'video', 'audio', 'music', 'text', 'note'],
-            description: 'The type of content this node produces',
+            enum: ['image', 'video', 'audio', 'music', 'text', 'note', 'website'],
+            description: 'The type of content this node produces. Use "website" for live sandbox preview.',
           },
           prompt: {
             type: 'string',
@@ -90,6 +90,14 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
             type: 'number',
             description:
               'Y position on canvas. Space nodes ~200px apart vertically.',
+          },
+          previewUrl: {
+            type: 'string',
+            description: 'Live preview URL for website nodes (from create_sandbox result).',
+          },
+          sandboxId: {
+            type: 'string',
+            description: 'E2B sandbox ID for website nodes.',
           },
         },
         required: ['contentType'],
@@ -241,6 +249,158 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
           },
         },
         required: ['title', 'markdown'],
+      },
+    },
+  },
+  // --- Coding / sandbox tools ---
+  {
+    type: 'function',
+    function: {
+      name: 'create_sandbox',
+      description:
+        'Create an E2B sandbox for a coding project. Pick the right template for the tech stack. Returns a sandboxId you must pass to run_coding_agent.',
+      parameters: {
+        type: 'object',
+        properties: {
+          templateName: {
+            type: 'string',
+            enum: ['nextjs', 'nextjs-convex'],
+            description: 'nextjs = frontend only (mock data). nextjs-convex = fullstack with real-time DB, auth, file storage.',
+          },
+        },
+        required: ['templateName'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_project_spec',
+      description: `Create the project.md specification file in the sandbox. This is read by coding agents to understand what to build. Call AFTER create_sandbox and BEFORE run_coding_agent.
+
+YOU (the orchestrator) define: features as user stories, data models, API operations, design system.
+Sub-agents will: read this spec, decide file structure/component names/routes, implement using their skills.
+
+DO NOT specify specific file names, component names, or API routes.
+Instead specify: user stories, data models (fields + types), operations (list, filter, create, etc.).`,
+      parameters: {
+        type: 'object',
+        properties: {
+          sandboxId: {
+            type: 'string',
+            description: 'The sandboxId returned by create_sandbox.',
+          },
+          name: {
+            type: 'string',
+            description: 'Project name.',
+          },
+          overview: {
+            type: 'string',
+            description: 'Brief description of what we are building and its purpose.',
+          },
+          tech_stack: {
+            type: 'object',
+            description: 'Technology choices.',
+            properties: {
+              frontend: { type: 'string', description: 'e.g., React 18, Next.js 15' },
+              backend: { type: 'string', description: 'e.g., Convex, Express, None' },
+              database: { type: 'string', description: 'e.g., Convex, PostgreSQL, None (mock data)' },
+              auth: { type: 'string', description: 'e.g., Clerk, None' },
+              styling: { type: 'string', description: 'e.g., Tailwind CSS + shadcn/ui' },
+            },
+          },
+          features: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: 'Feature title' },
+                user_story: { type: 'string', description: 'As a [user], I want to [action] so that [benefit]' },
+                acceptance_criteria: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'List of criteria that must be met',
+                },
+              },
+            },
+            description: 'List of features as user stories with acceptance criteria.',
+          },
+          data_models: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Model name (e.g., Product, User, Order)' },
+                fields: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Field definitions (e.g., "id: string", "price: number")',
+                },
+                relationships: { type: 'string', description: 'Relationships to other models' },
+              },
+            },
+            description: 'Data models/entities and their structure.',
+          },
+          api_operations: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Operations needed (e.g., "List products with optional category filter", "Create new order").',
+          },
+          design_system: {
+            type: 'object',
+            description: 'Design tokens and guidelines.',
+            properties: {
+              colors: {
+                type: 'object',
+                properties: {
+                  primary: { type: 'string' },
+                  secondary: { type: 'string' },
+                  background: { type: 'string' },
+                  text: { type: 'string' },
+                  accent: { type: 'string' },
+                },
+              },
+              typography: {
+                type: 'object',
+                properties: {
+                  headings: { type: 'string' },
+                  body: { type: 'string' },
+                },
+              },
+              theme: { type: 'string', description: 'e.g., Dark mode, minimalist, glassmorphism' },
+              border_radius: { type: 'string', description: 'e.g., rounded-lg (8px)' },
+              animations: { type: 'string', description: 'e.g., Subtle micro-animations' },
+            },
+          },
+        },
+        required: ['sandboxId', 'name', 'overview', 'features'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_coding_agent',
+      description:
+        'Run a coding sub-agent in the sandbox. The agent will read project.md, load relevant skills, and build the project autonomously. Run backend before frontend if both are needed. Run tester last.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sandboxId: {
+            type: 'string',
+            description: 'The sandboxId from create_sandbox.',
+          },
+          persona: {
+            type: 'string',
+            enum: ['frontend', 'backend', 'tester'],
+            description: 'Which sub-agent to run.',
+          },
+          userMessage: {
+            type: 'string',
+            description: 'The user request / instructions to pass to the sub-agent.',
+          },
+        },
+        required: ['sandboxId', 'persona', 'userMessage'],
       },
     },
   },
@@ -439,6 +599,9 @@ Do NOT use web_search for:
 - Questions about how the canvas works
 
 Note: web_search adds 2-5 seconds of latency. Only use it when genuinely needed.
+
+CITATION RULES for web_search:
+When you use web_search results in your response, you MUST include inline citations. Reference sources with numbered markers like [1], [2] etc. in your text. The source cards will be displayed separately, so the numbers help the user match claims to sources. Example: "FLUX Pro v1.1 supports ultra-high resolution output [1] and outperforms competing models on benchmark tests [2]."
 </web_tools>
 
 <deep_research_tool>
@@ -448,6 +611,8 @@ It searches the web from multiple angles, analyzes gaps, does follow-up searches
 Use deep_research when the user asks for research, a report, deep dive, analysis, or wants to learn about a topic thoroughly. Also use it when the user asks to "create a PDF about X" — research first, then create the PDF.
 
 Do NOT use deep_research for simple factual questions (use web_search), canvas operations, or questions you already know.
+
+After deep_research completes, summarize the key findings in your response and include inline citations like [1], [2] referencing the returned sources. Mention the most important 3-5 findings so the user gets immediate value without needing to read the full note.
 </deep_research_tool>
 
 <create_pdf_tool>
@@ -459,7 +624,46 @@ IMPORTANT workflow — when to create a PDF:
 - If the user says "make that a PDF" or "create PDF" referring to existing research: call create_pdf with the research content.
 
 Place the PDF node next to the research note (x+300 from the note node).
-</create_pdf_tool>`
+</create_pdf_tool>
+
+<coding_tools>
+You can build full applications using a sandboxed coding environment.
+
+Be concise when building. One line to state what you're building, then immediately call tools. No preamble, no lengthy explanations. Go straight to: create_sandbox → add_node → create_project_spec → run_coding_agent.
+
+CRITICAL RULES — VIOLATIONS WILL BREAK THE APP:
+- You get exactly ONE create_sandbox call. A second call will be REJECTED by the system. Pick the right template the first time.
+- You get exactly ONE add_node with contentType="website". A second call will be REJECTED.
+- You get exactly ONE create_project_spec call. Do NOT call it more than once.
+- All sub-agents share the SAME sandboxId. There is only one sandbox.
+- Convex templates (nextjs-convex etc.) ARE fullstack. They have a real-time database, auth, file storage, and serverless functions. Do NOT create a second sandbox "for the backend" — Convex IS the backend.
+- Build COMPLETE, production-grade apps. Not skeletons. Not demos. Real, fully functional apps with every feature implemented, realistic mock data, responsive design, and working interactions.
+- NEVER change your mind about the template after calling create_sandbox. Commit to your choice.
+
+Workflow:
+1. If unclear, ask 2-3 clarifying questions max. Otherwise go straight to building.
+2. Call create_sandbox ONCE with the right template — returns sandboxId and previewUrl.
+3. Call add_node ONCE with contentType="website", the previewUrl, sandboxId, label="Live Preview".
+4. Call create_project_spec with structured params: name, overview, features (user stories), data_models, api_operations, design_system. The system generates project.md from these — do NOT write raw markdown.
+5. Call run_coding_agent with the right persona(s), always using the SAME sandboxId.
+6. Done. The sub-agents build autonomously inside the sandbox.
+
+Template selection — follow this decision tree IN ORDER, stop at first match:
+1. User says "landing page", "portfolio", "static site", "marketing page" → nextjs (mock data, no backend)
+2. User says "mock data" or "no backend" → nextjs
+3. User needs REAL data persistence (users, auth, database, orders, accounts, CRUD operations) → nextjs-convex
+4. DEFAULT when none of the above match → nextjs (simpler, faster, mock data)
+
+nextjs-convex gives you Next.js + Convex = SSR, real-time DB, auth, file storage, serverless functions. No separate backend needed. But ONLY use it when real data persistence is required.
+
+DO NOT overthink template selection. Pick one in under 5 seconds and commit. A landing page is ALWAYS nextjs. An app with user accounts is ALWAYS nextjs-convex. Do not deliberate.
+
+Delegation order:
+- nextjs-convex: Delegate ONLY to "frontend". NO backend delegation needed. The frontend agent writes both UI code AND Convex functions (schema, queries, mutations). Convex IS the backend.
+- nextjs: Delegate only to "frontend".
+
+Mock data: When not using a real DB, create REALISTIC data — real names, descriptions, 10-20 items minimum, varied categories, Unsplash image URLs (https://images.unsplash.com/photo-xxx?w=400). Never use "Lorem ipsum" or "Test Item".
+</coding_tools>`
 
 // --- Tool response formatters ---
 
@@ -509,6 +713,9 @@ export type VirtualState = {
   edges: Array<CanvasEdge>
   nextNodeId: number
   nextEdgeId: number
+  sandboxId: string | null
+  templateName: string | null
+  hasWebsiteNode: boolean
 }
 
 export function formatCanvasStateResponse(state: VirtualState): string {
@@ -553,5 +760,8 @@ export function initVirtualState(
     edges: [...edges],
     nextNodeId: maxNodeNum + 1,
     nextEdgeId: edges.length + 1,
+    sandboxId: null,
+    templateName: null,
+    hasWebsiteNode: nodes.some((n) => n.contentType === 'website'),
   }
 }

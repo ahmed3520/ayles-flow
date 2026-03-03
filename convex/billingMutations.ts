@@ -3,8 +3,8 @@ import { v } from 'convex/values'
 import { internalMutation } from './_generated/server'
 
 const PLAN_CREDITS = {
-  free: 1.0,
-  pro: 50.0,
+  free: 10,
+  pro: 500,
 } as const
 
 export const activateSubscription = internalMutation({

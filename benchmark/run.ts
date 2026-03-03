@@ -1,4 +1,3 @@
-import OpenAI from 'openai'
 import { scenarios } from './scenarios'
 import { runScenario } from './runner'
 import { evaluateScenario } from './evaluator'
@@ -120,13 +119,6 @@ function printTable(
 // --- Main ---
 
 async function main() {
-  const apiKey = process.env.OPENROUTER_API_KEY
-
-  if (!apiKey) {
-    console.error('OPENROUTER_API_KEY is required')
-    process.exit(1)
-  }
-
   const { models, scenarioFilter, verbose } = parseArgs()
   const filtered = scenarioFilter
     ? scenarios.filter(
@@ -141,11 +133,6 @@ async function main() {
   )
   console.log(`Models: ${models.map((m) => m.label).join(', ')}\n`)
 
-  const client = new OpenAI({
-    baseURL: 'https://openrouter.ai/api/v1',
-    apiKey,
-  })
-
   const allScores: Array<ScenarioScore> = []
 
   for (const model of models) {
@@ -154,7 +141,7 @@ async function main() {
     for (const scenario of filtered) {
       process.stdout.write(`  ${scenario.name}...`)
 
-      const result = await runScenario(client, model, scenario)
+      const result = await runScenario(model, scenario)
       const score = evaluateScenario(scenario, result)
       allScores.push(score)
 

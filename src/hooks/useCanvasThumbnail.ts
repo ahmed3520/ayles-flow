@@ -32,6 +32,7 @@ export function useCanvasThumbnail(projectId: Id<'projects'>) {
         height: Math.round(
           THUMBNAIL_WIDTH * (el.offsetHeight / el.offsetWidth),
         ),
+        skipFonts: true,
         style: {
           transform: 'scale(1)',
           transformOrigin: 'top left',

@@ -5,6 +5,7 @@ import {
   Panel,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   addEdge,
   useEdgesState,
   useNodesState,
@@ -12,7 +13,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useMutation, useQuery } from 'convex/react'
-import { Bot, Check, Clock, Loader2 } from 'lucide-react'
+import { Bot, Check, Clock, Loader2, Undo2, Redo2 } from 'lucide-react'
 
 import { api } from '../../../convex/_generated/api'
 
@@ -27,11 +28,15 @@ import type { BlockNodeData, NodeContentType, PortType } from '@/types/nodes'
 import type { SaveStatus } from '@/hooks/useAutoSave'
 import { submitToFal } from '@/data/fal'
 import { executeGeneration } from '@/data/generationFlow'
+import { submitToOpenRouter } from '@/data/openrouter-generate'
 import { useAgentChat } from '@/hooks/useAgentChat'
 import { useAutoSave } from '@/hooks/useAutoSave'
+import { reconnectOrRestore } from '@/data/sandbox-sync'
 import { useCanvasThumbnail } from '@/hooks/useCanvasThumbnail'
+import { useCanvasHistory } from '@/hooks/useCanvasHistory'
 import { useCanvasKeyboard } from '@/hooks/useCanvasKeyboard'
 import {
+  NODE_DEFAULTS,
   PORT_TYPE_COLORS,
 } from '@/types/nodes'
 import {
@@ -99,18 +104,58 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     flowPosition: { x: number; y: number }
   } | null>(null)
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>(
+  const [nodes, setNodes, onNodesChangeBase] = useNodesState<Node>(
     [] as Array<Node>,
   )
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(
+  const [edges, setEdges, onEdgesChangeBase] = useEdgesState<Edge>(
     [] as Array<Edge>,
   )
   const { screenToFlowPosition, getNode } = useReactFlow()
+
+  // Stable refs for accessing current nodes/edges in callbacks without adding them as deps
+  const nodesRef = useRef(nodes)
+  const edgesRef = useRef(edges)
+  nodesRef.current = nodes
+  edgesRef.current = edges
+
+  const { pushSnapshot, initializeHistory, undo, redo, canUndo, canRedo } =
+    useCanvasHistory({
+      nodesRef,
+      edgesRef,
+      setNodes,
+      setEdges,
+      maxHistory: 50,
+      onRestore: (snapshot) => {
+        nodeIdRef.current = Math.max(nodeIdRef.current, computeMaxNodeId(snapshot.nodes))
+      },
+    })
+
+  // Wrap onNodesChange/onEdgesChange to push history before removals
+  const onNodesChange = useCallback(
+    (changes: Parameters<typeof onNodesChangeBase>[0]) => {
+      if (changes.some((c) => c.type === 'remove')) {
+        pushSnapshot(nodesRef.current, edgesRef.current)
+      }
+      onNodesChangeBase(changes)
+    },
+    [onNodesChangeBase, pushSnapshot],
+  )
+
+  const onEdgesChange = useCallback(
+    (changes: Parameters<typeof onEdgesChangeBase>[0]) => {
+      if (changes.some((c) => c.type === 'remove')) {
+        pushSnapshot(nodesRef.current, edgesRef.current)
+      }
+      onEdgesChangeBase(changes)
+    },
+    [onEdgesChangeBase, pushSnapshot],
+  )
 
   const project = useQuery(api.projects.get, { id: projectId })
   const allModels = useQuery(api.models.list) ?? []
   const createGeneration = useMutation(api.generations.create)
   const setFalRequestId = useMutation(api.generations.setFalRequestId)
+  const completeTextGeneration = useMutation(api.generations.completeTextGeneration)
 
   const agentModels = allModels.map((m) => ({
     falId: m.falId,
@@ -133,6 +178,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     setEdges,
     nodeIdRef,
     models: agentModels,
+    pushSnapshot,
   })
 
   const { saveStatus, initializeBaseline } = useAutoSave({
@@ -170,7 +216,63 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       setEdges(loadedEdges)
       nodeIdRef.current = computeMaxNodeId(loadedNodes)
       initializeBaseline()
+      initializeHistory()
       requestAnimationFrame(() => setIsLoaded(true))
+
+      // Restore dead sandboxes for website nodes
+      for (const node of loadedNodes) {
+        const nd = node.data as Record<string, unknown>
+        if (nd?.contentType !== 'website' || !nd?.sandboxId) continue
+
+        // Mark node as restoring
+        const updateNodeData = (patch: Record<string, unknown>) =>
+          setNodes((prev) => prev.map((n) =>
+            n.id === node.id ? { ...n, data: { ...n.data, ...patch } } : n,
+          ))
+
+        updateNodeData({ restoreStep: 'Connecting...' })
+
+        reconnectOrRestore({
+          data: {
+            sandboxId: nd.sandboxId as string,
+            projectId: projectId as string,
+            templateName: (nd.templateName as string) || undefined,
+          },
+        }).then(async (response) => {
+          const res = response as unknown as Response
+          const reader = res.body?.getReader()
+          if (!reader) return
+          const decoder = new TextDecoder()
+          let buffer = ''
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+            for (const line of lines) {
+              if (!line.trim()) continue
+              try {
+                const event = JSON.parse(line)
+                if (event.type === 'status') {
+                  updateNodeData({ restoreStep: event.step })
+                } else if (event.type === 'done') {
+                  updateNodeData({
+                    sandboxId: event.sandboxId,
+                    previewUrl: event.previewUrl,
+                    restoreStep: null,
+                  })
+                } else if (event.type === 'error') {
+                  updateNodeData({ restoreStep: `Error: ${event.message}` })
+                }
+              } catch { /* skip */ }
+            }
+          }
+        }).catch((e) => {
+          console.error('[sandbox-restore]', e)
+          updateNodeData({ restoreStep: 'Restore failed' })
+        })
+      }
     }
   }, [project])
 
@@ -188,6 +290,9 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     setNodes,
     setEdges,
     nodeIdCounter: nodeIdRef,
+    pushSnapshot,
+    undo,
+    redo,
   })
 
   useEffect(() => {
@@ -197,6 +302,8 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
 
   const onConnect: OnConnect = useCallback(
     (connection) => {
+      pushSnapshot(nodesRef.current, edgesRef.current)
+
       const sourceType = connection.sourceHandle?.replace(
         'output-',
         '',
@@ -216,7 +323,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
         ),
       )
     },
-    [setEdges],
+    [setEdges, pushSnapshot],
   )
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -229,6 +336,8 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       event.preventDefault()
       const rawContentType = event.dataTransfer.getData('application/reactflow')
       if (!rawContentType) return
+
+      pushSnapshot(nodesRef.current, edgesRef.current)
       const contentType = rawContentType as NodeContentType
 
       const position = screenToFlowPosition({
@@ -237,10 +346,12 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       })
 
       const id = getNextId()
+      const defaults = NODE_DEFAULTS[contentType]
       const newNode: Node<BlockNodeData> = {
         id,
         type: 'blockNode',
         position,
+        style: { width: defaults.width, height: defaults.height },
         data: {
           contentType,
           label: `New ${contentType} block`,
@@ -252,13 +363,14 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
 
       setNodes((nds) => [...nds, newNode])
     },
-    [screenToFlowPosition, setNodes],
+    [screenToFlowPosition, setNodes, pushSnapshot],
   )
 
   const addNodeAtCenter = useCallback(
     (contentType: NodeContentType) => {
       if (!reactFlowWrapper.current) return
 
+      pushSnapshot(nodesRef.current, edgesRef.current)
       const rect = reactFlowWrapper.current.getBoundingClientRect()
       const position = screenToFlowPosition({
         x: rect.left + rect.width / 2,
@@ -266,10 +378,12 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       })
 
       const id = getNextId()
+      const defaults = NODE_DEFAULTS[contentType]
       const newNode: Node<BlockNodeData> = {
         id,
         type: 'blockNode',
         position,
+        style: { width: defaults.width, height: defaults.height },
         data: {
           contentType,
           label: `New ${contentType} block`,
@@ -281,13 +395,14 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
 
       setNodes((nds) => [...nds, newNode])
     },
-    [screenToFlowPosition, setNodes],
+    [screenToFlowPosition, setNodes, pushSnapshot],
   )
 
   const addUploadNode = useCallback(
     (contentType: NodeContentType, uploadId: string, url: string) => {
       if (!reactFlowWrapper.current) return
 
+      pushSnapshot(nodesRef.current, edgesRef.current)
       const rect = reactFlowWrapper.current.getBoundingClientRect()
       const position = screenToFlowPosition({
         x: rect.left + rect.width / 2,
@@ -295,10 +410,12 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       })
 
       const id = getNextId()
+      const defaults = NODE_DEFAULTS[contentType]
       const newNode: Node<BlockNodeData> = {
         id,
         type: 'blockNode',
         position,
+        style: { width: defaults.width, height: defaults.height },
         data: {
           contentType,
           label: `Uploaded ${contentType}`,
@@ -313,16 +430,19 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
 
       setNodes((nds) => [...nds, newNode])
     },
-    [screenToFlowPosition, setNodes],
+    [screenToFlowPosition, setNodes, pushSnapshot],
   )
 
   const addNodeAtPosition = useCallback(
     (contentType: NodeContentType, position: { x: number; y: number }) => {
+      pushSnapshot(nodesRef.current, edgesRef.current)
       const id = getNextId()
+      const defaults = NODE_DEFAULTS[contentType]
       const newNode: Node<BlockNodeData> = {
         id,
         type: 'blockNode',
         position,
+        style: { width: defaults.width, height: defaults.height },
         data: {
           contentType,
           label: `New ${contentType} block`,
@@ -333,7 +453,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       }
       setNodes((nds) => [...nds, newNode])
     },
-    [setNodes],
+    [setNodes, pushSnapshot],
   )
 
   const onNodeContextMenu = useCallback(
@@ -362,6 +482,10 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     [screenToFlowPosition],
   )
 
+  const onNodeDragStart = useCallback(() => {
+    pushSnapshot(nodesRef.current, edgesRef.current)
+  }, [pushSnapshot])
+
   const handleGenerate = useCallback(
     async (sourceNodeId: string) => {
       if (generatingRef.current.has(sourceNodeId)) return
@@ -370,7 +494,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
         sourceNodeId,
         {
           getNode,
-          edges,
+          edges: edgesRef.current,
           createGeneration: async (args) => {
             const id = await createGeneration(args)
             return id as unknown as string
@@ -378,6 +502,54 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
           submitToFal: (args) => submitToFal(args),
           setFalRequestId: async (args) => {
             await setFalRequestId({ id: args.id as never, falRequestId: args.falRequestId })
+          },
+          submitToOpenRouter: async ({ data, onDelta }) => {
+            const response = await submitToOpenRouter({ data })
+            const res = response instanceof Response
+              ? response
+              : new Response(JSON.stringify(response))
+            if (!res.body) throw new Error('No response body')
+
+            const reader = res.body.getReader()
+            const decoder = new TextDecoder()
+            let buffer = ''
+            let fullText = ''
+            let usage = { inputTokens: 0, outputTokens: 0 }
+
+            for (;;) {
+              const { done, value } = await reader.read()
+              if (done) break
+              buffer += decoder.decode(value, { stream: true })
+              const lines = buffer.split('\n')
+              buffer = lines.pop() || ''
+
+              for (const line of lines) {
+                if (!line.trim()) continue
+                let event: Record<string, unknown>
+                try { event = JSON.parse(line) } catch { continue }
+
+                if (event.type === 'text_delta') {
+                  fullText += event.content as string
+                  onDelta(fullText)
+                } else if (event.type === 'done') {
+                  fullText = (event.text as string) || fullText
+                  const u = event.usage as { inputTokens: number; outputTokens: number } | undefined
+                  if (u) usage = u
+                } else if (event.type === 'error') {
+                  throw new Error(event.message as string)
+                }
+              }
+            }
+
+            return { text: fullText, usage }
+          },
+          completeTextGeneration: async (args) => {
+            await completeTextGeneration({
+              generationId: args.generationId as never,
+              resultText: args.resultText,
+              inputTokens: args.inputTokens,
+              outputTokens: args.outputTokens,
+            })
           },
         },
         {
@@ -395,7 +567,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
         },
       )
     },
-    [getNode, setNodes, edges, createGeneration, setFalRequestId],
+    [getNode, setNodes, createGeneration, setFalRequestId, completeTextGeneration],
   )
 
   // Show loading until project data arrives
@@ -427,11 +599,13 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
             isValidConnection={isValidConnection}
             connectionRadius={20}
             selectionOnDrag
+            selectionMode={SelectionMode.Partial}
             panOnDrag={[1, 2]}
             panOnScroll
             zoomOnScroll={false}
             zoomOnPinch
             elevateNodesOnSelect
+            onNodeDragStart={onNodeDragStart}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onNodeContextMenu={onNodeContextMenu}
@@ -459,6 +633,32 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
                     {project.name}
                   </div>
                   <SaveIndicator status={saveStatus} />
+                </div>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={undo}
+                    disabled={!canUndo}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      canUndo
+                        ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                        : 'text-zinc-700 cursor-not-allowed'
+                    }`}
+                    title="Undo (Ctrl+Z)"
+                  >
+                    <Undo2 size={14} />
+                  </button>
+                  <button
+                    onClick={redo}
+                    disabled={!canRedo}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      canRedo
+                        ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                        : 'text-zinc-700 cursor-not-allowed'
+                    }`}
+                    title="Redo (Ctrl+Shift+Z)"
+                  >
+                    <Redo2 size={14} />
+                  </button>
                 </div>
                 <button
                   onClick={() => setShowVersions(!showVersions)}
@@ -523,6 +723,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
           onClose={() => setContextMenu(null)}
           onDelete={() => {
             if (contextMenu.targetNode) {
+              pushSnapshot(nodesRef.current, edgesRef.current)
               const nodeId = contextMenu.targetNode.id
               setNodes((nds) => nds.filter((n) => n.id !== nodeId))
               setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))

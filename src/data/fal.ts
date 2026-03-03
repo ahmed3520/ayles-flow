@@ -18,6 +18,11 @@ const AUDIO_PARAM_OVERRIDES: Partial<Record<string, string>> = {
   'fal-ai/minimax-music': 'reference_audio_url',
 }
 
+// Models that accept image_urls (array) instead of image_url (string)
+const IMAGE_ARRAY_MODELS = new Set([
+  'fal-ai/bytedance/seedream/v5/lite/edit',
+])
+
 export function buildFalInput(data: SubmitInput): Record<string, unknown> {
   const { contentType, model, prompt, imageUrl, audioUrl, videoUrl } = data
   const input: Record<string, unknown> = {}
@@ -25,7 +30,7 @@ export function buildFalInput(data: SubmitInput): Record<string, unknown> {
   // Content-type defaults
   switch (contentType) {
     case 'image':
-      input.image_size = 'landscape_4_3'
+      input.image_size = IMAGE_ARRAY_MODELS.has(model) ? 'auto_2K' : 'landscape_4_3'
       input.num_images = 1
       break
     case 'video':
@@ -48,7 +53,11 @@ export function buildFalInput(data: SubmitInput): Record<string, unknown> {
 
   // Media inputs — flat fields, no nested objects
   if (imageUrl) {
-    input.image_url = imageUrl
+    if (IMAGE_ARRAY_MODELS.has(model)) {
+      input.image_urls = [imageUrl]
+    } else {
+      input.image_url = imageUrl
+    }
   }
   if (audioUrl) {
     input[AUDIO_PARAM_OVERRIDES[model] ?? 'audio_url'] = audioUrl
