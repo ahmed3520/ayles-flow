@@ -32,6 +32,7 @@ router = APIRouter()
 
 MAX_TOOL_ROUNDS = 500
 CONTINUATION_PROMPT = "You were cut off mid-response. Continue building from where you stopped. Do NOT repeat work already done."
+TRUNCATED_WRITE_PROMPT = "Your last tool call was truncated because the file was too large for a single response. The file was NOT written. Continue from where you stopped — write the file now. Do NOT repeat work already done."
 
 JS_TEMPLATES = {
     "vite", "nextjs", "tanstack", "remix", "nuxt", "svelte", "astro",
@@ -385,7 +386,7 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                 messages,
                 model=model,
                 tools=coding_tools if coding_tools else None,
-                max_tokens=8192,
+                max_tokens=16384,
                 temperature=0.4,
             ):
                 etype = event.get("type")
@@ -419,12 +420,14 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                     raise RuntimeError(event.get("error", "LLM error"))
 
             # Drop truncated tool call when cut off by max_tokens
+            truncated_tool_name = ""
             if finish_reason == "length" and completed_calls:
                 last = completed_calls[-1]
                 try:
                     json.loads(last["args"])
                 except (json.JSONDecodeError, KeyError):
-                    log.warning(f"[coding:{req.persona}] dropping truncated tool call: {last.get('name')}")
+                    truncated_tool_name = last.get("name", "")
+                    log.warning(f"[coding:{req.persona}] dropping truncated tool call: {truncated_tool_name}")
                     completed_calls.pop()
 
             # No tool calls — check if we should continue or exit
@@ -432,7 +435,8 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                 pending = _has_pending_tasks(text)
                 if finish_reason == "length" or pending:
                     messages.append({"role": "assistant", "content": text or ""})
-                    messages.append({"role": "user", "content": CONTINUATION_PROMPT})
+                    prompt = TRUNCATED_WRITE_PROMPT if truncated_tool_name in ("write", "edit", "multi_edit") else CONTINUATION_PROMPT
+                    messages.append({"role": "user", "content": prompt})
                     continue
                 exit_reason = f"no_tool_calls:{finish_reason}"
                 break
