@@ -4,11 +4,10 @@ Coding Tool Executor — dispatches and executes coding tools in E2B sandboxes.
 Port of src/data/coding-tool-executor.ts
 """
 
-import asyncio
 import json
 import re
 import logging
-from typing import Any, Callable, Awaitable, Optional
+from typing import Any, Callable, Optional
 from dataclasses import dataclass, field
 
 from e2b import Sandbox
@@ -35,7 +34,7 @@ class BackgroundProcess:
 @dataclass
 class ToolContext:
     background_processes: dict[str, BackgroundProcess] = field(default_factory=dict)
-    write: Callable[[dict], Awaitable[None]] = None  # type: ignore
+    write: Callable[[dict], None] = None  # type: ignore
     lsp_port: Optional[int] = None
     project_id: str = ""
     workdir: str = "/home/user/app/"
@@ -110,8 +109,8 @@ def _get_lsp_diagnostics(sandbox: Sandbox, lsp_port: Optional[int], file_path: s
     try:
         escaped_path = _shell_escape(file_path)
         result = sandbox.commands.run(
-            f"curl -s -m 10 'http://127.0.0.1:{lsp_port}/diagnostics?file={escaped_path}'",
-            timeout=12,
+            f"curl -s -m 3 'http://127.0.0.1:{lsp_port}/diagnostics?file={escaped_path}'",
+            timeout=5,
         )
         if result.exit_code != 0 or not result.stdout.strip():
             return None
@@ -213,7 +212,7 @@ def _load_skill(name: str) -> Optional[dict]:
 
 # --- Main executor ---
 
-async def execute_coding_tool(
+def execute_coding_tool(
     sandbox: Sandbox,
     tool_name: str,
     args: dict,
@@ -224,7 +223,7 @@ async def execute_coding_tool(
         return ToolResult(success=False, error=validation_error, validation_error=True)
 
     try:
-        result = await _dispatch(sandbox, tool_name, args, context)
+        result = _dispatch(sandbox, tool_name, args, context)
         return ToolResult(success=True, result=result)
     except Exception as e:
         msg = str(e)
@@ -244,7 +243,7 @@ def _resolve_path(path: str, workdir: str) -> str:
     return f"{wd}/{path}"
 
 
-async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolContext) -> Any:
+def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolContext) -> Any:
 
     # ===== File Operations =====
 
@@ -262,7 +261,7 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
         path = _resolve_path(args["path"], ctx.workdir)
         content = args["content"]
         sandbox.files.write(path, content)
-        await ctx.write({"type": "file_change", "path": path, "action": "create"})
+        ctx.write({"type": "file_change", "path": path, "action": "create"})
         # R2 sync (fire-and-forget)
         _sync_to_r2(ctx.project_id, ctx.workdir, path, content)
         diags = _get_lsp_diagnostics(sandbox, ctx.lsp_port, path)
@@ -293,8 +292,8 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
             updated = content.replace(old_str, new_str, 1)
 
         sandbox.files.write(path, updated)
-        await ctx.write({"type": "file_change", "path": path, "action": "update"})
-        asyncio.get_event_loop().run_in_executor(None, _sync_to_r2, ctx.project_id, ctx.workdir, path, updated)
+        ctx.write({"type": "file_change", "path": path, "action": "update"})
+        _sync_to_r2(ctx.project_id, ctx.workdir, path, updated)
         diags = _get_lsp_diagnostics(sandbox, ctx.lsp_port, path)
         result = {"success": True, "path": path}
         if diags:
@@ -315,7 +314,7 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
                 content = content.replace(edit["old_string"], edit["new_string"], 1)
 
         sandbox.files.write(path, content)
-        await ctx.write({"type": "file_change", "path": path, "action": "update"})
+        ctx.write({"type": "file_change", "path": path, "action": "update"})
         _sync_to_r2(ctx.project_id, ctx.workdir, path, content)
         diags = _get_lsp_diagnostics(sandbox, ctx.lsp_port, path)
         result = {"success": True, "path": path, "edits_applied": len(edits)}
@@ -326,7 +325,7 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
     if tool_name == "delete":
         path = _resolve_path(args["path"], ctx.workdir)
         sandbox.commands.run(f"rm -rf '{_shell_escape(path)}'")
-        await ctx.write({"type": "file_change", "path": path, "action": "delete"})
+        ctx.write({"type": "file_change", "path": path, "action": "delete"})
         _delete_from_r2(ctx.project_id, ctx.workdir, path)
         return {"success": True, "path": path}
 
@@ -339,8 +338,8 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
         from_path = _resolve_path(args["from_path"], ctx.workdir)
         to_path = _resolve_path(args["to_path"], ctx.workdir)
         sandbox.commands.run(f"mv '{_shell_escape(from_path)}' '{_shell_escape(to_path)}'")
-        await ctx.write({"type": "file_change", "path": from_path, "action": "delete"})
-        await ctx.write({"type": "file_change", "path": to_path, "action": "create"})
+        ctx.write({"type": "file_change", "path": from_path, "action": "delete"})
+        ctx.write({"type": "file_change", "path": to_path, "action": "create"})
         _delete_from_r2(ctx.project_id, ctx.workdir, from_path)
         try:
             new_content = sandbox.files.read(to_path)
@@ -509,8 +508,8 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
             command,
             cwd=cwd,
             timeout=timeout_s,
-            on_stdout=lambda data: asyncio.ensure_future(ctx.write({"type": "terminal_output", "content": data, "stream": "stdout"})),
-            on_stderr=lambda data: asyncio.ensure_future(ctx.write({"type": "terminal_output", "content": data, "stream": "stderr"})),
+            on_stdout=lambda data: ctx.write({"type": "terminal_output", "content": data, "stream": "stdout"}),
+            on_stderr=lambda data: ctx.write({"type": "terminal_output", "content": data, "stream": "stderr"}),
         )
 
         return {
@@ -612,7 +611,7 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
         skill = _load_skill(name)
         if not skill:
             return {"error": f"Skill '{name}' not found"}
-        await ctx.write({"type": "skill_loaded", "name": name})
+        ctx.write({"type": "skill_loaded", "name": name})
         return skill
 
     # ===== Preview =====
@@ -620,7 +619,7 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
     if tool_name == "get_preview_url":
         port = args["port"]
         url = get_preview_url(sandbox, port)
-        await ctx.write({"type": "preview_url", "url": url, "port": port})
+        ctx.write({"type": "preview_url", "url": url, "port": port})
         return {"url": url, "port": port}
 
     raise ValueError(f"Unknown tool: {tool_name}")

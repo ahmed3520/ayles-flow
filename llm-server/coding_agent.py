@@ -354,10 +354,12 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
             log.info(f"[coding:{req.persona}] LSP daemon on port {lsp_port}")
 
         # Tool context — events are collected and yielded by the generator
-        event_queue: asyncio.Queue = asyncio.Queue()
+        # Uses thread-safe queue so tool calls can run in parallel threads
+        import queue
+        event_queue: queue.Queue = queue.Queue()
 
-        async def emit_event(event: dict):
-            await event_queue.put(event)
+        def emit_event(event: dict):
+            event_queue.put(event)
 
         tool_ctx = ToolContext(
             write=emit_event,
@@ -465,17 +467,25 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                 assistant_msg["reasoning_details"] = reasoning_details
             messages.append(assistant_msg)
 
-            # Execute tool calls
-            for tc in completed_calls:
-                args = _safe_parse_json(tc["args"])
-                result = await execute_coding_tool(sandbox, tc["name"], args, tool_ctx)
+            # Execute tool calls in parallel via thread pool
+            parsed_calls = [(tc, _safe_parse_json(tc["args"])) for tc in completed_calls]
 
+            if len(parsed_calls) == 1:
+                tc, args = parsed_calls[0]
+                results = [(tc, args, execute_coding_tool(sandbox, tc["name"], args, tool_ctx))]
+            else:
+                parallel_results = await asyncio.gather(*[
+                    asyncio.to_thread(execute_coding_tool, sandbox, tc["name"], args, tool_ctx)
+                    for tc, args in parsed_calls
+                ])
+                results = [(tc, args, r) for (tc, args), r in zip(parsed_calls, parallel_results)]
+
+            for tc, args, result in results:
                 yield {"type": "tool_call", "tool": tc["name"], "args": _strip_large_args(args)}
 
                 # Drain any events from tool execution
                 while not event_queue.empty():
-                    evt = event_queue.get_nowait()
-                    yield evt
+                    yield event_queue.get_nowait()
 
                 if result.expired:
                     yield {"type": "error", "message": "Sandbox expired."}
