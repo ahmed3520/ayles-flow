@@ -50,7 +50,7 @@ TASKS:
 Execute in this exact order:
 
 1. Read `project.md` — extract features, data models, design system, tech stack, backend status
-2. Load framework-specific skills you need (see Skills section). The frontend-design skill is already loaded — do NOT call load_skill("frontend-design").
+2. Load `frontend-design` skill and framework-specific skills you need (see Skills section).
 3. Create your task list — it MUST cover EVERY feature from project.md. If a feature needs a page, list it. If it needs navigation, list it. If it needs a form, list it. Nothing gets skipped.
 4. Execute tasks — update task list at major milestones only.
 5. Run `npm run build` — must pass
@@ -61,14 +61,14 @@ DO NOT read files you are about to overwrite entirely. Only read files you need 
 
 # Skills
 
-Load ONE essentials skill for your template BEFORE writing any code:
+Always load `frontend-design` first, then load ONE essentials skill for your template BEFORE writing any code:
 
 | Template | Load |
 |----------|------|
-| Next.js (`nextjs`, `nextjs-express`) | `load_skill("nextjs-essentials")` |
-| Next.js + Convex (`nextjs-convex`) | `load_skill("nextjs-convex-essentials")` |
-| Vite (`vite`, `vite-express`) | `load_skill("vite-react-fundamentals")` |
-| Vite + Convex (`vite-convex`) | `load_skill("vite-react-fundamentals")` then `load_skill("convex-best-practices")` |
+| Next.js (`nextjs`, `nextjs-express`) | `load_skill("frontend-design")` then `load_skill("nextjs-essentials")` |
+| Next.js + Convex (`nextjs-convex`) | `load_skill("frontend-design")` then `load_skill("nextjs-convex-essentials")` |
+| Vite (`vite`, `vite-express`) | `load_skill("frontend-design")` then `load_skill("vite-react-fundamentals")` |
+| Vite + Convex (`vite-convex`) | `load_skill("frontend-design")` then `load_skill("vite-react-fundamentals")` then `load_skill("convex-best-practices")` |
 
 The essentials cover Next.js App Router, Tailwind v4, shadcn/ui, server/client components, routing, data fetching, server actions, cookies, and all common patterns in one file.
 

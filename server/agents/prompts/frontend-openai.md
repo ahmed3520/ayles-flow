@@ -109,14 +109,14 @@ Execute in this order:
 
 ## Skills
 
-Load ONE essentials skill BEFORE writing code (in the same round as reading `project.md`):
+Load `frontend-design` plus ONE essentials skill BEFORE writing code (in the same round as reading `project.md`):
 
-- Next.js: `load_skill("nextjs-essentials")`
-- Next.js + Convex: `load_skill("nextjs-convex-essentials")`
-- Vite: `load_skill("vite-react-fundamentals")`
-- Vite + Convex: `load_skill("vite-react-fundamentals")` then `load_skill("convex-best-practices")`
+- Next.js: `load_skill("frontend-design")` + `load_skill("nextjs-essentials")`
+- Next.js + Convex: `load_skill("frontend-design")` + `load_skill("nextjs-convex-essentials")`
+- Vite: `load_skill("frontend-design")` + `load_skill("vite-react-fundamentals")`
+- Vite + Convex: `load_skill("frontend-design")` + `load_skill("vite-react-fundamentals")` then `load_skill("convex-best-practices")`
 
-The `frontend-design` skill is already loaded — do NOT call `load_skill("frontend-design")`.
+Always load `frontend-design` first — call `load_skill("frontend-design")` alongside your essentials skill.
 
 Only load individual skills if you keep failing on a specific topic.
 

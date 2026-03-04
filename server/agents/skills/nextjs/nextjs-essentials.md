@@ -674,7 +674,66 @@ export function ClientButton() {
 
 ---
 
-## 16. Anti-Patterns Checklist
+## 16. Hydration Errors
+
+Server-rendered HTML must EXACTLY match the first client render. Mismatches cause React to patch the DOM (slow) or break interactivity.
+
+### Common Causes & Fixes
+
+| Cause | Fix |
+|---|---|
+| `Math.random()` in render | Generate values once with `useState(() => ...)` or use CSS animations instead |
+| `Date.now()` / `new Date()` in render | Pass timestamp from server as prop, or format in `useEffect` |
+| `typeof window !== 'undefined'` branching | Use `useEffect` for client-only code, not conditional rendering |
+| `window.innerWidth` in render | Use `useEffect` + `useState` for viewport values |
+| Invalid HTML nesting (`<p>` inside `<p>`, `<div>` inside `<p>`) | Fix the HTML structure |
+
+### Pattern: Random/Dynamic Values
+
+```tsx
+// WRONG — different value on server vs client
+function Stars() {
+  return Array.from({ length: 50 }).map((_, i) => (
+    <div key={i} style={{ top: `${Math.random() * 100}%` }} />  // hydration error!
+  ));
+}
+
+// CORRECT — deterministic with seeded positions
+function Stars() {
+  const positions = useMemo(() =>
+    Array.from({ length: 50 }, (_, i) => ({
+      top: `${(i * 17.3 + 11.7) % 100}%`,  // deterministic pseudo-random
+      left: `${(i * 31.1 + 7.3) % 100}%`,
+    })), []
+  );
+  return positions.map((pos, i) => <div key={i} style={pos} />);
+}
+
+// CORRECT — client-only rendering
+function Stars() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  // Now safe to use Math.random()
+}
+```
+
+### Pattern: Date/Time
+```tsx
+// WRONG — server and client render different times
+<span>{new Date().toLocaleString()}</span>
+
+// CORRECT — render on client only
+function TimeDisplay() {
+  const [time, setTime] = useState<string>('');
+  useEffect(() => setTime(new Date().toLocaleString()), []);
+  return <span>{time}</span>;
+}
+```
+
+---
+
+## 17. Anti-Patterns Checklist
 
 | Anti-Pattern | Fix |
 |---|---|
@@ -693,10 +752,12 @@ export function ClientButton() {
 | `<img>` tag | `next/image` with width/height or fill |
 | Returning data from form actions | Return void, or use `useActionState` |
 | `'use server'` in client file | Separate into actions.ts file |
+| `Math.random()` / `Date.now()` in render | Deterministic values or client-only with `useEffect` |
+| `typeof window` branching in render | Use `useEffect` + `useState` for client-only code |
 
 ---
 
-## 17. Tailwind v4 + shadcn/ui
+## 18. Tailwind v4 + shadcn/ui
 
 Templates are pre-configured. **NEVER** run scaffolding, `npx shadcn init`, or install tailwindcss/shadcn deps.
 

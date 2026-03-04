@@ -137,14 +137,6 @@ def _build_system_prompt(persona: str, template_name: str, model: Optional[str] 
         f"\n\n--- ENVIRONMENT ---\nTemplate: {template_name}\nWorking directory: {workdir}\nDev command: {dev_cmd}\nDefault port: {default_port}"
     )
 
-    # 3. Core skill
-    core_skills = {"frontend": "frontend-design", "backend": "backend-dev"}
-    core_skill_name = core_skills.get(persona)
-    if core_skill_name:
-        skill_content = _load_skill_content(base_dir, core_skill_name)
-        if skill_content:
-            parts.append(f"\n\n--- {core_skill_name.upper()} ---\n\n{skill_content}")
-
     return "".join(parts)
 
 
