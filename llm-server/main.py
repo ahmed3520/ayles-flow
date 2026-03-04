@@ -6,6 +6,7 @@ Uses llm_client module for all OpenRouter interaction.
 
 Endpoints:
   POST /v1/chat/stream  → NDJSON stream
+  WS   /v1/chat/ws      → WebSocket stream
   POST /v1/chat         → JSON response
 """
 
@@ -16,7 +17,7 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -59,6 +60,37 @@ async def chat_stream(req: ChatRequest):
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+@app.websocket("/v1/chat/ws")
+async def chat_stream_ws(websocket: WebSocket):
+    """Streaming chat endpoint over WebSocket."""
+    await websocket.accept()
+    try:
+        payload = await websocket.receive_json()
+        req = ChatRequest(**payload)
+
+        async for event in llm_client.stream_chat(
+            req.messages,
+            model=req.model,
+            tools=req.tools,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+        ):
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        log.info("chat/ws disconnected")
+    except Exception as e:
+        log.error(f"chat/ws error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "error": str(e)})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 # ─── Non-streaming endpoint ─────────────────────────────────────────

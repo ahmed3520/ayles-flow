@@ -16,6 +16,7 @@ import type {
   MessagePart,
   StreamEvent,
 } from '@/types/agent'
+import { agentChat } from '@/data/agent'
 import type { BlockNodeData } from '@/types/nodes'
 import { DEFAULT_AGENT_MODEL } from '@/config/agentModels'
 import { NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
@@ -51,6 +52,7 @@ export function useAgentChat({
   const [agentModel, setAgentModel] = useState(DEFAULT_AGENT_MODEL)
   const abortRef = useRef<AbortController | null>(null)
   const readerRef = useRef<ReadableStreamDefaultReader | null>(null)
+  const socketRef = useRef<WebSocket | null>(null)
   const loadedChatRef = useRef<string | null>(null)
   const activeChatIdRef = useRef<Id<'chats'> | null>(null)
   activeChatIdRef.current = activeChatId
@@ -380,38 +382,17 @@ export function useAgentChat({
 
         const canvasState = getCanvasState()
 
-        // Call server function — returns a streaming Response
-        // Wrap with abort support since createServerFn doesn't accept signals
-        const { agentChat } = await import('@/data/agent')
-        const response = await Promise.race([
-          agentChat({
-            data: {
-              messages: historyMessages,
-              canvasState,
-              models,
-              agentModel,
-              projectId: projectId as string,
-            },
-          }),
-          new Promise<never>((_, reject) => {
-            controller.signal.addEventListener('abort', () =>
-              reject(new DOMException('Aborted', 'AbortError')),
-            )
-          }),
-        ])
+        const rawWsBase =
+          ((import.meta as any).env.VITE_LLM_WS_URL as string | undefined)
+          || ((import.meta as any).env.VITE_LLM_SERVER_URL as string | undefined)
+          || (window.location.hostname === 'localhost'
+            ? 'ws://localhost:9400'
+            : 'wss://lm.aylesflow.com')
+        const wsBase = rawWsBase.startsWith('ws')
+          ? rawWsBase
+          : rawWsBase.replace(/^http/i, 'ws')
+        const wsUrl = `${wsBase.replace(/\/$/, '')}/v1/agent/ws`
 
-        // Handle case where createServerFn wraps the response
-        const res =
-          response instanceof Response
-            ? response
-            : new Response(JSON.stringify(response))
-
-        if (!res.body) throw new Error('No response body')
-
-        const reader = res.body.getReader()
-        readerRef.current = reader
-        const decoder = new TextDecoder()
-        let buffer = ''
         let fullContent = ''
         const allActions: Array<AgentAction> = []
         const allParts: Array<MessagePart> = []
@@ -434,150 +415,267 @@ export function useAgentChat({
           })
         }
 
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (!line.trim()) continue
-            let event: StreamEvent
-            try {
-              event = JSON.parse(line) as StreamEvent
-            } catch {
-              continue
+        const handleEvent = (event: StreamEvent) => {
+          switch (event.type) {
+            case 'text_delta': {
+              if (isActive()) setToolStatus(null)
+              fullContent += event.content
+              const lastPart = allParts.at(-1)
+              if (lastPart?.type === 'text') {
+                lastPart.content += event.content
+              } else {
+                allParts.push({ type: 'text', content: event.content })
+              }
+              updateAssistant({
+                content: fullContent,
+                parts: [...allParts],
+              })
+              break
             }
 
-            switch (event.type) {
-              case 'text_delta': {
-                if (isActive()) setToolStatus(null)
-                fullContent += event.content
-                const lastPart = allParts.at(-1)
-                if (lastPart?.type === 'text') {
-                  lastPart.content += event.content
-                } else {
-                  allParts.push({ type: 'text', content: event.content })
-                }
-                updateAssistant({
-                  content: fullContent,
-                  parts: [...allParts],
-                })
-                break
+            case 'reasoning': {
+              const last = allParts.at(-1)
+              if (last?.type === 'reasoning') {
+                last.content += event.content
+              } else {
+                allParts.push({ type: 'reasoning', content: event.content })
               }
+              updateAssistant({ parts: [...allParts] })
+              break
+            }
 
-              case 'reasoning': {
-                // Append to current reasoning part, or start a new one.
-                // Within each agentic round, reasoning streams before content/tools,
-                // so checking the last part correctly groups chunks per round.
-                const last = allParts.at(-1)
-                if (last?.type === 'reasoning') {
-                  last.content += event.content
-                } else {
-                  allParts.push({ type: 'reasoning', content: event.content })
+            case 'tool_status':
+              if (isActive()) setToolStatus(event.status)
+              break
+
+            case 'tool_start':
+              allParts.push({
+                type: 'tool_call',
+                tool: event.tool,
+                args: event.args,
+                status: 'pending',
+              })
+              updateAssistant({ parts: [...allParts] })
+              break
+
+            case 'tool_call': {
+              if (isActive()) setToolStatus(null)
+              let matched = false
+              for (let idx = allParts.length - 1; idx >= 0; idx--) {
+                const p = allParts[idx]
+                if (p.type === 'tool_call' && p.status === 'pending' && p.tool === event.tool) {
+                  allParts[idx] = { ...p, args: event.args, status: 'done', error: event.error }
+                  matched = true
+                  break
                 }
-                updateAssistant({ parts: [...allParts] })
-                break
               }
-
-              case 'tool_status':
-                if (isActive()) setToolStatus(event.status)
-                break
-
-              case 'tool_start':
-                allParts.push({
-                  type: 'tool_call',
-                  tool: event.tool,
-                  args: event.args,
-                  status: 'pending',
-                })
-                updateAssistant({ parts: [...allParts] })
-                break
-
-              case 'tool_call': {
-                if (isActive()) setToolStatus(null)
-                let matched = false
-                // Match by tool name first, then fall back to any pending
+              if (!matched) {
                 for (let idx = allParts.length - 1; idx >= 0; idx--) {
                   const p = allParts[idx]
-                  if (p.type === 'tool_call' && p.status === 'pending' && p.tool === event.tool) {
+                  if (p.type === 'tool_call' && p.status === 'pending') {
                     allParts[idx] = { ...p, args: event.args, status: 'done', error: event.error }
                     matched = true
                     break
                   }
                 }
-                if (!matched) {
-                  for (let idx = allParts.length - 1; idx >= 0; idx--) {
-                    const p = allParts[idx]
-                    if (p.type === 'tool_call' && p.status === 'pending') {
-                      allParts[idx] = { ...p, args: event.args, status: 'done', error: event.error }
-                      matched = true
-                      break
-                    }
-                  }
-                }
-                if (!matched) {
-                  allParts.push({ type: 'tool_call', tool: event.tool, args: event.args, status: 'done', error: event.error })
-                }
-                updateAssistant({ parts: [...allParts] })
-                break
               }
+              if (!matched) {
+                allParts.push({ type: 'tool_call', tool: event.tool, args: event.args, status: 'done', error: event.error })
+              }
+              updateAssistant({ parts: [...allParts] })
+              break
+            }
 
-              case 'action': {
-                if (isActive()) setToolStatus(null)
+            case 'action': {
+              if (isActive()) setToolStatus(null)
+              if (event.action.type === 'create_pdf') {
+                createPdfFromAction(event.action)
+                const slim = { ...event.action, markdown: '[content]' } as AgentAction
+                allActions.push(slim)
+                allParts.push({ type: 'action', action: slim })
+              } else {
+                applyAction(event.action)
+                allActions.push(event.action)
+                allParts.push({ type: 'action', action: event.action })
+              }
+              updateAssistant({
+                actions: [...allActions],
+                parts: [...allParts],
+              })
+              break
+            }
 
-                if (event.action.type === 'create_pdf') {
-                  createPdfFromAction(event.action)
-                  const slim = {
-                    ...event.action,
-                    markdown: '[content]',
-                  } as AgentAction
-                  allActions.push(slim)
-                  allParts.push({ type: 'action', action: slim })
-                } else {
-                  applyAction(event.action)
-                  allActions.push(event.action)
-                  allParts.push({ type: 'action', action: event.action })
-                }
+            case 'resources':
+              if (isActive()) setToolStatus(null)
+              allParts.push({ type: 'resources', sources: event.sources })
+              updateAssistant({ parts: [...allParts] })
+              break
 
-                updateAssistant({
-                  actions: [...allActions],
-                  parts: [...allParts],
+            case 'error': {
+              fullContent += `\n\nError: ${event.message}`
+              const errLastPart = allParts.at(-1)
+              if (errLastPart?.type === 'text') {
+                errLastPart.content += `\n\nError: ${event.message}`
+              } else {
+                allParts.push({
+                  type: 'text',
+                  content: `\n\nError: ${event.message}`,
                 })
-                break
               }
+              updateAssistant({
+                content: fullContent,
+                parts: [...allParts],
+              })
+              break
+            }
 
-              case 'resources':
-                if (isActive()) setToolStatus(null)
-                allParts.push({ type: 'resources', sources: event.sources })
-                updateAssistant({ parts: [...allParts] })
-                break
+            case 'done':
+              if (isActive()) setToolStatus(null)
+              break
+          }
+        }
 
-              case 'error': {
-                fullContent += `\n\nError: ${event.message}`
-                const errLastPart = allParts.at(-1)
-                if (errLastPart?.type === 'text') {
-                  errLastPart.content += `\n\nError: ${event.message}`
-                } else {
-                  allParts.push({
-                    type: 'text',
-                    content: `\n\nError: ${event.message}`,
-                  })
-                }
-                updateAssistant({
-                  content: fullContent,
-                  parts: [...allParts],
-                })
-                break
+        const streamViaHttp = async () => {
+          const response = await Promise.race([
+            agentChat({
+              data: {
+                messages: historyMessages,
+                canvasState,
+                models,
+                agentModel,
+                projectId: projectId as string,
+              },
+            }),
+            new Promise<never>((_, reject) => {
+              controller.signal.addEventListener('abort', () =>
+                reject(new DOMException('Aborted', 'AbortError')),
+              )
+            }),
+          ])
+
+          const res =
+            response instanceof Response
+              ? response
+              : new Response(JSON.stringify(response))
+
+          if (!res.body) throw new Error('No response body')
+
+          const reader = res.body.getReader()
+          readerRef.current = reader
+          const decoder = new TextDecoder()
+          let buffer = ''
+
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+              if (!line.trim()) continue
+              let parsed: Record<string, unknown>
+              try {
+                parsed = JSON.parse(line) as Record<string, unknown>
+              } catch {
+                continue
               }
-
-              case 'done':
-                if (isActive()) setToolStatus(null)
-                break
+              if (parsed.type === 'ping') continue
+              handleEvent(parsed as StreamEvent)
             }
           }
+        }
+
+        let wsTransportFailed = false
+        try {
+          await new Promise<void>((resolve, reject) => {
+            let settled = false
+            let sawDone = false
+
+            const socket = new WebSocket(wsUrl)
+            socketRef.current = socket
+
+            const finish = (fn: () => void) => {
+              if (settled) return
+              settled = true
+              fn()
+            }
+
+            socket.onopen = () => {
+              socket.send(
+                JSON.stringify({
+                  messages: historyMessages,
+                  canvasState,
+                  models,
+                  agentModel,
+                  projectId: projectId as string,
+                }),
+              )
+            }
+
+            socket.onmessage = (msg) => {
+              if (typeof msg.data !== 'string') return
+              let parsed: Record<string, unknown>
+              try {
+                parsed = JSON.parse(msg.data) as Record<string, unknown>
+              } catch {
+                return
+              }
+
+              if (parsed.type === 'ping') return
+              const event = parsed as StreamEvent
+              if (event.type === 'done') {
+                sawDone = true
+              }
+              handleEvent(event)
+              if (event.type === 'done') {
+                try {
+                  socket.close(1000, 'done')
+                } catch {
+                  // ignore
+                }
+              }
+            }
+
+            socket.onerror = () => {
+              finish(() => reject(new Error('WebSocket connection error')))
+            }
+
+            socket.onclose = (ev) => {
+              socketRef.current = null
+              if (controller.signal.aborted) {
+                finish(() => reject(new DOMException('Aborted', 'AbortError')))
+                return
+              }
+              if (sawDone) {
+                finish(resolve)
+                return
+              }
+              finish(() =>
+                reject(
+                  new Error(
+                    `WebSocket closed (${ev.code})${ev.reason ? `: ${ev.reason}` : ''}`,
+                  ),
+                ),
+              )
+            }
+
+            controller.signal.addEventListener('abort', () => {
+              try {
+                socket.close(1000, 'aborted')
+              } catch {
+                // ignore
+              }
+            })
+          })
+        } catch (wsErr) {
+          if ((wsErr as Error).name === 'AbortError') throw wsErr
+          wsTransportFailed = true
+          console.warn('WebSocket transport failed; falling back to HTTP stream', wsErr)
+        }
+
+        if (wsTransportFailed && !controller.signal.aborted) {
+          await streamViaHttp()
         }
 
         // Save assistant message to Convex (skip if aborted)
@@ -608,6 +706,8 @@ export function useAgentChat({
         }
       } finally {
         readerRef.current = null
+        socketRef.current?.close(1000, 'cleanup')
+        socketRef.current = null
         // Only clear streaming state if this is still the active stream
         if (abortRef.current === controller) {
           setStreamingChatId(null)
@@ -634,6 +734,8 @@ export function useAgentChat({
   const stopStreaming = useCallback(() => {
     readerRef.current?.cancel()
     readerRef.current = null
+    socketRef.current?.close(1000, 'stopped')
+    socketRef.current = null
     abortRef.current?.abort()
     abortRef.current = null
     setStreamingChatId(null)

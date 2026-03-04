@@ -2,7 +2,9 @@
 Orchestrator Agent — master agent that manages the canvas, research, and coding.
 
 Port of src/data/agent.ts
-Endpoint: POST /v1/agent/chat → NDJSON streaming response
+Endpoints:
+  POST /v1/agent/chat → NDJSON streaming response
+  WS   /v1/agent/ws   → WebSocket streaming response
 
 Uses llm_client directly for LLM calls.
 Calls coding_agent_loop directly for sub-agent dispatch (no HTTP).
@@ -16,7 +18,7 @@ import logging
 from collections import Counter
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -651,160 +653,192 @@ async def _run_coding_agent_inline(state, args, project_id, llm_model):
 
 # --- Endpoint ---
 
-@router.post("/v1/agent/chat")
-async def agent_chat(req: AgentChatRequest):
-    """Orchestrator agent loop — NDJSON streaming response."""
+async def _agent_event_stream(req: AgentChatRequest):
+    """Orchestrator agent loop — yields event dicts."""
     model = req.agentModel or llm_client.DEFAULT_MODEL
+    try:
+        state = VirtualState(
+            req.canvasState.get("nodes", []),
+            req.canvasState.get("edges", []),
+        )
 
-    async def generate():
-        try:
-            state = VirtualState(
-                req.canvasState.get("nodes", []),
-                req.canvasState.get("edges", []),
-            )
+        event_queue: asyncio.Queue = asyncio.Queue()
 
-            event_queue: asyncio.Queue = asyncio.Queue()
+        async def write(event: dict):
+            await event_queue.put(event)
 
-            async def write(event: dict):
-                await event_queue.put(event)
+        messages = [
+            {"role": "system", "content": _get_system_prompt()},
+            {"role": "system", "content": _build_runtime_context(state, req.models)},
+            *[{"role": m["role"], "content": m["content"]} for m in req.messages],
+        ]
 
-            messages = [
-                {"role": "system", "content": _get_system_prompt()},
-                {"role": "system", "content": _build_runtime_context(state, req.models)},
-                *[{"role": m["role"], "content": m["content"]} for m in req.messages],
-            ]
+        for rnd in range(MAX_TOOL_ROUNDS):
+            content = ""
+            completed_calls = []
+            finish_reason = ""
+            reasoning_content = ""
+            reasoning_details = None
 
-            for rnd in range(MAX_TOOL_ROUNDS):
-                content = ""
-                completed_calls = []
-                finish_reason = ""
-                reasoning_content = ""
-                reasoning_details = None
+            async for event in llm_client.stream_chat(
+                messages,
+                model=model,
+                tools=ORCHESTRATOR_TOOLS,
+                max_tokens=llm_client.DEFAULT_MAX_TOKENS,
+                temperature=llm_client.DEFAULT_TEMPERATURE,
+            ):
+                etype = event.get("type")
 
-                async for event in llm_client.stream_chat(
-                    messages,
-                    model=model,
-                    tools=ORCHESTRATOR_TOOLS,
-                    max_tokens=llm_client.DEFAULT_MAX_TOKENS,
-                    temperature=llm_client.DEFAULT_TEMPERATURE,
-                ):
-                    etype = event.get("type")
+                if etype == "ping":
+                    yield {"type": "ping"}
+                elif etype == "reasoning":
+                    reasoning_content += event["content"]
+                    yield {"type": "reasoning", "content": event["content"]}
+                elif etype == "content":
+                    content += event["content"]
+                    yield {"type": "text_delta", "content": event["content"]}
+                elif etype == "tool_start":
+                    if event.get("name") != "run_coding_agent":
+                        yield {"type": "tool_start", "tool": event.get("name", ""), "args": {}}
+                elif etype == "tool_complete":
+                    completed_calls = event.get("toolCalls", [])
+                    finish_reason = event.get("finishReason", "tool_calls")
+                    if event.get("reasoningDetails"):
+                        reasoning_details = event["reasoningDetails"]
+                elif etype == "done":
+                    finish_reason = event.get("finishReason", "stop")
+                    if event.get("reasoningDetails"):
+                        reasoning_details = event["reasoningDetails"]
+                elif etype == "error":
+                    raise RuntimeError(event.get("error", "LLM error"))
 
-                    if etype == "ping":
-                        yield json.dumps({"type": "ping"}) + "\n"
-                    elif etype == "reasoning":
-                        reasoning_content += event["content"]
-                        yield json.dumps({"type": "reasoning", "content": event["content"]}) + "\n"
-                    elif etype == "content":
-                        content += event["content"]
-                        yield json.dumps({"type": "text_delta", "content": event["content"]}) + "\n"
-                    elif etype == "tool_start":
-                        if event.get("name") != "run_coding_agent":
-                            yield json.dumps({"type": "tool_start", "tool": event.get("name", ""), "args": {}}) + "\n"
-                    elif etype == "tool_complete":
-                        completed_calls = event.get("toolCalls", [])
-                        finish_reason = event.get("finishReason", "tool_calls")
-                        if event.get("reasoningDetails"):
-                            reasoning_details = event["reasoningDetails"]
-                    elif etype == "done":
-                        finish_reason = event.get("finishReason", "stop")
-                        if event.get("reasoningDetails"):
-                            reasoning_details = event["reasoningDetails"]
-                    elif etype == "error":
-                        raise RuntimeError(event.get("error", "LLM error"))
+            # Drop truncated tool call when cut off
+            if finish_reason == "length" and completed_calls:
+                last = completed_calls[-1]
+                try:
+                    json.loads(last["args"])
+                except (json.JSONDecodeError, KeyError):
+                    completed_calls.pop()
 
-                # Drop truncated tool call when cut off
-                if finish_reason == "length" and completed_calls:
-                    last = completed_calls[-1]
-                    try:
-                        json.loads(last["args"])
-                    except (json.JSONDecodeError, KeyError):
-                        completed_calls.pop()
+            # No valid tool calls
+            if not completed_calls:
+                if finish_reason == "length":
+                    messages.append({"role": "assistant", "content": content or ""})
+                    messages.append({"role": "user", "content": CONTINUATION_PROMPT})
+                    continue
+                yield {"type": "done"}
+                break
 
-                # No valid tool calls
-                if not completed_calls:
-                    if finish_reason == "length":
-                        messages.append({"role": "assistant", "content": content or ""})
-                        messages.append({"role": "user", "content": CONTINUATION_PROMPT})
-                        continue
-                    yield json.dumps({"type": "done"}) + "\n"
-                    break
+            # Push assistant message (with summarized args to save context)
+            assistant_msg = {
+                "role": "assistant",
+                "content": content or None,
+                "tool_calls": [
+                    {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": _summarize_args(tc["name"], tc["args"])}}
+                    for tc in completed_calls
+                ],
+            }
+            if reasoning_details:
+                assistant_msg["reasoning_details"] = reasoning_details
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            messages.append(assistant_msg)
 
-                # Push assistant message (with summarized args to save context)
-                assistant_msg = {
-                    "role": "assistant",
-                    "content": content or None,
-                    "tool_calls": [
-                        {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": _summarize_args(tc["name"], tc["args"])}}
-                        for tc in completed_calls
-                    ],
-                }
-                if reasoning_details:
-                    assistant_msg["reasoning_details"] = reasoning_details
-                if reasoning_content:
-                    assistant_msg["reasoning_content"] = reasoning_content
-                messages.append(assistant_msg)
+            # Execute each tool
+            for tc in completed_calls:
+                args = {}
+                try:
+                    args = json.loads(tc["args"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
 
-                # Execute each tool
-                for tc in completed_calls:
-                    args = {}
-                    try:
-                        args = json.loads(tc["args"])
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-
-                    # run_coding_agent: stream events inline (not via queue)
-                    if tc["name"] == "run_coding_agent":
-                        result = ""
-                        async for evt_line in _run_coding_agent_inline(
-                            state, args, req.projectId, model,
-                        ):
-                            if evt_line.startswith('{"_result":'):
-                                result = json.loads(evt_line).get("_result", "")
-                            else:
-                                yield evt_line + "\n"
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc["id"],
-                            "content": result,
-                        })
-                        continue
-
-                    result, action, sources = await _execute_tool(
-                        state, req.models, tc["name"], args, write, req.projectId, model,
-                    )
-
-                    is_error = result.startswith('{"error"')
-                    evt = {"type": "tool_call", "tool": tc["name"], "args": _strip_large_args(args)}
-                    if is_error:
-                        evt["error"] = True
-                    yield json.dumps(evt) + "\n"
-
-                    if action:
-                        yield json.dumps({"type": "action", "action": action}) + "\n"
-                    if sources:
-                        yield json.dumps({"type": "resources", "sources": sources}) + "\n"
-
-                    # Drain any queued events
-                    while not event_queue.empty():
-                        evt = event_queue.get_nowait()
-                        yield json.dumps(evt) + "\n"
-
+                # run_coding_agent: stream events inline (not via queue)
+                if tc["name"] == "run_coding_agent":
+                    result = ""
+                    async for evt_line in _run_coding_agent_inline(
+                        state, args, req.projectId, model,
+                    ):
+                        evt = json.loads(evt_line)
+                        if "_result" in evt:
+                            result = evt.get("_result", "")
+                        else:
+                            yield evt
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
                         "content": result,
                     })
+                    continue
 
-        except Exception as e:
-            log.error(f"[orchestrator] ERROR: {e}")
-            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+                result, action, sources = await _execute_tool(
+                    state, req.models, tc["name"], args, write, req.projectId, model,
+                )
+
+                is_error = result.startswith('{"error"')
+                evt = {"type": "tool_call", "tool": tc["name"], "args": _strip_large_args(args)}
+                if is_error:
+                    evt["error"] = True
+                yield evt
+
+                if action:
+                    yield {"type": "action", "action": action}
+                if sources:
+                    yield {"type": "resources", "sources": sources}
+
+                # Drain any queued events
+                while not event_queue.empty():
+                    evt = event_queue.get_nowait()
+                    yield evt
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result,
+                })
+
+    except Exception as e:
+        log.error(f"[orchestrator] ERROR: {e}")
+        yield {"type": "error", "message": str(e)}
+
+
+@router.post("/v1/agent/chat")
+async def agent_chat(req: AgentChatRequest):
+    """Orchestrator agent loop — NDJSON streaming response."""
+
+    async def generate():
+        async for event in _agent_event_stream(req):
+            yield json.dumps(event) + "\n"
 
     return StreamingResponse(
         generate(),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+@router.websocket("/v1/agent/ws")
+async def agent_chat_ws(websocket: WebSocket):
+    """Orchestrator agent loop — WebSocket streaming response."""
+    await websocket.accept()
+    try:
+        payload = await websocket.receive_json()
+        req = AgentChatRequest(**payload)
+
+        async for event in _agent_event_stream(req):
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        log.info("[orchestrator] websocket disconnected")
+    except Exception as e:
+        log.error(f"[orchestrator] websocket error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 # --- Builtin system prompt (same as STATIC_SYSTEM_PROMPT in agent-config.ts) ---

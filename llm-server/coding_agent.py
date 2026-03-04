@@ -2,7 +2,9 @@
 Coding Agent — agentic loop that writes code in E2B sandboxes.
 
 Port of src/data/coding-agent.ts
-Endpoint: POST /v1/coding/chat → NDJSON streaming response
+Endpoints:
+  POST /v1/coding/chat → NDJSON streaming response
+  WS   /v1/coding/ws   → WebSocket streaming response
 
 Uses llm_client directly — no HTTP self-call.
 """
@@ -15,7 +17,7 @@ import time
 import logging
 from typing import Optional, AsyncGenerator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -527,3 +529,28 @@ async def coding_chat(req: CodingChatRequest):
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+@router.websocket("/v1/coding/ws")
+async def coding_chat_ws(websocket: WebSocket):
+    """Coding agent loop — WebSocket streaming response."""
+    await websocket.accept()
+    try:
+        payload = await websocket.receive_json()
+        req = CodingChatRequest(**payload)
+
+        async for event in coding_agent_loop(req):
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        log.info("[coding] websocket disconnected")
+    except Exception as e:
+        log.error(f"[coding] websocket error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
