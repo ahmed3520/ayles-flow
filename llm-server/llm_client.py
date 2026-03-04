@@ -169,7 +169,6 @@ async def stream_chat(
         reasoning_content = ""
         reasoning_details: list[dict] = []
         last_yield = time.monotonic()
-
         # Wrap stream with heartbeat — send ping every 15s to keep connection alive
         stream_iter = stream.__aiter__()
         while True:
