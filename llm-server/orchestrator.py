@@ -584,7 +584,9 @@ async def _run_coding_agent_inline(state, args, project_id, llm_model):
             template_name=state.template_name,
         )):
             etype = event.get("type")
-            if etype == "text_delta":
+            if etype == "ping":
+                yield json.dumps({"type": "ping"})
+            elif etype == "text_delta":
                 agent_output += event.get("content", "")
                 yield json.dumps({"type": "text_delta", "content": event.get("content", "")})
             elif etype == "reasoning":
@@ -653,7 +655,9 @@ async def agent_chat(req: AgentChatRequest):
                 ):
                     etype = event.get("type")
 
-                    if etype == "reasoning":
+                    if etype == "ping":
+                        yield json.dumps({"type": "ping"}) + "\n"
+                    elif etype == "reasoning":
                         reasoning_content += event["content"]
                         yield json.dumps({"type": "reasoning", "content": event["content"]}) + "\n"
                     elif etype == "content":

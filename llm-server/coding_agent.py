@@ -277,6 +277,9 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                     reasoning_content += event["content"]
                     yield {"type": "reasoning", "content": event["content"]}
 
+                elif etype == "ping":
+                    yield {"type": "ping"}
+
                 elif etype == "tool_start":
                     yield {"type": "tool_start", "tool": event.get("name", "")}
 
