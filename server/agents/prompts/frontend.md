@@ -99,6 +99,8 @@ Check `design/` for frame specs and reference images.
 - Match existing code patterns
 - Semantic design tokens only — never hardcode `text-white` or `bg-black`
 - No comments unless asked
+- **Dummy/sample data**: Use minimal placeholder items (2–3, not 10+). Put shared sample data in ONE file (e.g. `lib/data.ts`) and import everywhere — never duplicate data across components.
+- **Keep files small**: Avoid writing overly large files. Split big components into smaller ones.
 
 # Completion
 

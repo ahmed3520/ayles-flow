@@ -132,6 +132,8 @@ Only load individual skills if you keep failing on a specific topic.
 - Semantic design tokens — never hardcode `text-white` or `bg-black`
 - No comments unless asked
 - No one-letter variable names
+- **Dummy/sample data**: Use minimal placeholder items (2–3, not 10+). Put shared sample data in ONE file (e.g. `lib/data.ts`) and import everywhere — never duplicate data across components.
+- **Keep files small**: Avoid writing overly large files. Split big components into smaller ones.
 
 # Completion
 

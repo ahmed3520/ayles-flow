@@ -297,6 +297,15 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                 elif etype == "error":
                     raise RuntimeError(event.get("error", "LLM error"))
 
+            # Drop truncated tool call when cut off by max_tokens
+            if finish_reason == "length" and completed_calls:
+                last = completed_calls[-1]
+                try:
+                    json.loads(last["args"])
+                except (json.JSONDecodeError, KeyError):
+                    log.warning(f"[coding:{req.persona}] dropping truncated tool call: {last.get('name')}")
+                    completed_calls.pop()
+
             # No tool calls — check if we should continue or exit
             if not completed_calls:
                 pending = _has_pending_tasks(text)
@@ -367,6 +376,12 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
         yield {"type": "agent_done", "persona": req.persona}
         yield {"type": "done"}
 
+    except asyncio.CancelledError:
+        log.warning(f"[coding:{req.persona}] CANCELLED — client disconnected or timeout (round in progress, {len(messages)} msgs)")
+        yield {"type": "error", "message": "Request cancelled — client disconnected"}
+    except GeneratorExit:
+        log.warning(f"[coding:{req.persona}] GENERATOR EXIT — client disconnected (round in progress, {len(messages)} msgs)")
+        return
     except Exception as e:
         log.error(f"[coding:{req.persona}] ERROR: {e}")
         yield {"type": "error", "message": str(e)}
