@@ -13,6 +13,7 @@ import json
 import os
 import re
 import logging
+from collections import Counter
 from typing import Optional
 
 from fastapi import APIRouter
@@ -143,11 +144,44 @@ def _format_models(models: list[dict], content_type: Optional[str] = None) -> st
     return "\n\n".join(sections)
 
 
+def _build_runtime_context(state: VirtualState, models: list[dict]) -> str:
+    """Compact runtime snapshot to avoid unnecessary discovery tool calls."""
+    node_lines = []
+    for n in state.nodes[:12]:
+        prompt = (n.get("prompt") or "").strip()
+        if prompt:
+            prompt = prompt[:120] + ("..." if len(prompt) > 120 else "")
+        else:
+            prompt = "(empty)"
+        node_lines.append(
+            f"- {n.get('id', '?')} | type={n.get('contentType', '?')} | label={json.dumps(n.get('label', ''))} | status={n.get('generationStatus', 'idle')} | prompt={json.dumps(prompt)}"
+        )
+    if len(state.nodes) > 12:
+        node_lines.append(f"- ... and {len(state.nodes) - 12} more nodes")
+
+    model_counts = Counter((m.get("contentType") or "unknown") for m in models)
+    model_parts = ", ".join(
+        f"{ct}={model_counts.get(ct, 0)}"
+        for ct in ("image", "video", "audio", "music")
+    )
+
+    lines = [
+        "<runtime_context>",
+        f"Canvas snapshot (current request): nodes={len(state.nodes)}, edges={len(state.edges)}, hasWebsiteNode={state.has_website_node}.",
+        "Nodes:",
+        *(node_lines if node_lines else ["- (none)"]),
+        f"Available model counts: {model_parts}.",
+        "This snapshot is current. Only call get_canvas_state/get_available_models if you need full details beyond this snapshot.",
+        "</runtime_context>",
+    ]
+    return "\n".join(lines)
+
+
 # --- Tool definitions (OpenAI function calling format) ---
 
 ORCHESTRATOR_TOOLS: list[dict] = [
-    {"type": "function", "function": {"name": "get_canvas_state", "description": "Get the current canvas state: all nodes and edges. Call this FIRST before making any changes.", "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {"name": "get_available_models", "description": "Get the list of available AI models grouped by category.", "parameters": {"type": "object", "properties": {"contentType": {"type": "string", "enum": ["image", "video", "audio", "music"], "description": "Optional: filter by content type."}}}}},
+    {"type": "function", "function": {"name": "get_canvas_state", "description": "Get full canvas state (all nodes/edges) when the runtime snapshot is insufficient for the task.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "get_available_models", "description": "Get the full list of available AI models grouped by category. Use when you need exact model IDs or model capabilities.", "parameters": {"type": "object", "properties": {"contentType": {"type": "string", "enum": ["image", "video", "audio", "music"], "description": "Optional: filter by content type."}}}}},
     {"type": "function", "function": {"name": "web_search", "description": "Search the web or visit a URL for real-time information.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Search query or URL"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "add_node", "description": "Add a new node to the canvas.", "parameters": {"type": "object", "properties": {"contentType": {"type": "string", "enum": ["image", "video", "audio", "music", "text", "note", "website"]}, "prompt": {"type": "string"}, "model": {"type": "string"}, "label": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "previewUrl": {"type": "string"}, "sandboxId": {"type": "string"}}, "required": ["contentType"]}}},
     {"type": "function", "function": {"name": "connect_nodes", "description": "Connect two nodes with an edge.", "parameters": {"type": "object", "properties": {"sourceNodeId": {"type": "string"}, "targetNodeId": {"type": "string"}, "portType": {"type": "string", "enum": ["text", "image", "audio", "video", "pdf"]}}, "required": ["sourceNodeId", "targetNodeId", "portType"]}}},
@@ -636,6 +670,7 @@ async def agent_chat(req: AgentChatRequest):
 
             messages = [
                 {"role": "system", "content": _get_system_prompt()},
+                {"role": "system", "content": _build_runtime_context(state, req.models)},
                 *[{"role": m["role"], "content": m["content"]} for m in req.messages],
             ]
 
@@ -780,7 +815,7 @@ Nodes are blocks that generate content (images, videos, audio, music). Users wir
 You help users build and modify these workflows. You can add nodes, connect them, update settings, and delete them.
 You CANNOT run generations — only the user can trigger that.
 
-IMPORTANT: You do NOT have the canvas state or model list in this prompt. You MUST call get_canvas_state and get_available_models tools to see what's on the canvas and what models are available before taking action. Always call get_canvas_state first.
+IMPORTANT: You receive a runtime canvas/model snapshot on every request. Use that snapshot directly for speed. Call get_canvas_state/get_available_models only when you need deeper detail not present in the snapshot.
 </role>
 
 <canvas_concepts>

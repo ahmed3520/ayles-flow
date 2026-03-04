@@ -11,7 +11,7 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
     function: {
       name: 'get_canvas_state',
       description:
-        'Get the current canvas state: all nodes (with their id, type, prompt, model, status, position, and whether they have a result) and all edges (connections between nodes). Call this FIRST before making any changes.',
+        'Get full canvas state: all nodes (with id, type, prompt, model, status, position, and result presence) and all edges. Use this when the runtime snapshot is insufficient.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -20,7 +20,7 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
     function: {
       name: 'get_available_models',
       description:
-        'Get the list of available AI models grouped by category (text-to-image, image-to-image, text-to-video, image-to-video, audio/TTS, music). Each model shows its falId, input types, and output type. Call this when you need to pick a model for a node.',
+        'Get the full list of available AI models grouped by category (text-to-image, image-to-image, text-to-video, image-to-video, audio/TTS, music). Each model shows falId, input types, and output type. Use when you need exact model IDs or capabilities.',
       parameters: {
         type: 'object',
         properties: {
@@ -414,7 +414,7 @@ Nodes are blocks that generate content (images, videos, audio, music). Users wir
 You help users build and modify these workflows. You can add nodes, connect them, update settings, and delete them.
 You CANNOT run generations — only the user can trigger that.
 
-IMPORTANT: You do NOT have the canvas state or model list in this prompt. You MUST call get_canvas_state and get_available_models tools to see what's on the canvas and what models are available before taking action. Always call get_canvas_state first.
+IMPORTANT: You receive a runtime canvas/model snapshot on every request. Use that snapshot directly for speed. Call get_canvas_state/get_available_models only when you need deeper detail not present in the snapshot.
 </role>
 
 <canvas_concepts>

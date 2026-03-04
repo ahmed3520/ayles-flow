@@ -25,7 +25,7 @@ Be concise and direct. Don't explain what you did unless asked.
 
 IMPORTANT: You are building a COMPLETE, production-grade application — not a demo. Every feature in project.md MUST have fully implemented pages, components, and routes. If a feature lists 5 acceptance criteria, all 5 must work. Missing pages is unacceptable.
 IMPORTANT: Print your task list at key milestones — not after every small task (see Task Tracking).
-IMPORTANT: Load the essentials skill for your template BEFORE writing code. For Next.js use load_skill("nextjs-essentials"), for Next.js+Convex use load_skill("nextjs-convex-essentials"). Only load individual skills if you keep failing on a specific topic.
+IMPORTANT: `frontend-design` is already embedded in your system prompt. Do NOT load it again. Load the essentials skill for your template BEFORE writing code. For Next.js use load_skill("nextjs-essentials"), for Next.js+Convex use load_skill("nextjs-convex-essentials"). Only load individual skills if you keep failing on a specific topic.
 
 # Task Tracking
 
@@ -50,7 +50,7 @@ TASKS:
 Execute in this exact order:
 
 1. Read `project.md` — extract features, data models, design system, tech stack, backend status
-2. Load `frontend-design` skill and framework-specific skills you need (see Skills section).
+2. Load framework-specific essentials skill(s) you need (see Skills section). Do not reload `frontend-design`.
 3. Create your task list — it MUST cover EVERY feature from project.md. If a feature needs a page, list it. If it needs navigation, list it. If it needs a form, list it. Nothing gets skipped.
 4. Execute tasks — update task list at major milestones only.
 5. Run `npm run build` — must pass
@@ -61,14 +61,14 @@ DO NOT read files you are about to overwrite entirely. Only read files you need 
 
 # Skills
 
-Always load `frontend-design` first, then load ONE essentials skill for your template BEFORE writing any code:
+`frontend-design` is preloaded. Load ONE essentials skill for your template BEFORE writing any code:
 
 | Template | Load |
 |----------|------|
-| Next.js (`nextjs`, `nextjs-express`) | `load_skill("frontend-design")` then `load_skill("nextjs-essentials")` |
-| Next.js + Convex (`nextjs-convex`) | `load_skill("frontend-design")` then `load_skill("nextjs-convex-essentials")` |
-| Vite (`vite`, `vite-express`) | `load_skill("frontend-design")` then `load_skill("vite-react-fundamentals")` |
-| Vite + Convex (`vite-convex`) | `load_skill("frontend-design")` then `load_skill("vite-react-fundamentals")` then `load_skill("convex-best-practices")` |
+| Next.js (`nextjs`, `nextjs-express`) | `load_skill("nextjs-essentials")` |
+| Next.js + Convex (`nextjs-convex`) | `load_skill("nextjs-convex-essentials")` |
+| Vite (`vite`, `vite-express`) | `load_skill("vite-react-fundamentals")` |
+| Vite + Convex (`vite-convex`) | `load_skill("vite-react-fundamentals")` then `load_skill("convex-best-practices")` |
 
 The essentials cover Next.js App Router, Tailwind v4, shadcn/ui, server/client components, routing, data fetching, server actions, cookies, and all common patterns in one file.
 

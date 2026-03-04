@@ -44,6 +44,83 @@ LSP_BRIDGE_PORT = 7998
 
 _lsp_bridge_script: Optional[str] = None
 
+TEMPLATE_STRUCTURES: dict[str, str] = {
+    "nextjs": """## What's Already In Your Sandbox
+
+**Framework**: Next.js (App Router, TypeScript, Tailwind CSS, ESLint)
+**Scaffolded with**: create-next-app (--app --src-dir --import-alias '@/*')
+
+**Pre-installed packages**:
+- clsx, tailwind-merge, class-variance-authority, lucide-react
+- shadcn/ui — ALL components pre-installed in `components/ui/`
+
+**File structure**:
+```
+src/
+  app/
+    layout.tsx
+    page.tsx
+    globals.css
+  lib/
+    utils.ts
+components/
+  ui/             ← ALL shadcn components
+public/
+package.json
+tsconfig.json
+next.config.ts
+components.json
+```
+
+**IMPORTANT**:
+- shadcn/ui components ALREADY EXIST. NEVER recreate them, NEVER edit files in `components/ui/`.
+- Tailwind is already configured.
+- NEVER run scaffolding commands (`create-next-app`, `npm init`, `npx shadcn init`, etc.)
+- Port: 3000, Dev command: npm run dev""",
+    "nextjs-convex": """## What's Already In Your Sandbox
+
+**Framework**: Next.js (App Router, TypeScript, Tailwind CSS) + Convex backend
+**Scaffolded with**: create-next-app + convex
+
+**Pre-installed packages**:
+- convex (real-time database, auth, file storage, serverless functions)
+- clsx, tailwind-merge, class-variance-authority, lucide-react
+- shadcn/ui — ALL components pre-installed in `components/ui/`
+
+**File structure**:
+```
+src/
+  app/
+    layout.tsx
+    page.tsx
+    globals.css
+  lib/
+    utils.ts
+components/
+  ui/              ← ALL shadcn components
+convex/
+  _generated/      ← auto-generated (DO NOT EDIT)
+  schema.ts
+public/
+package.json
+tsconfig.json
+next.config.ts
+components.json
+```
+
+**IMPORTANT**:
+- Convex IS the backend. Write schema in `convex/schema.ts`, queries/mutations in `convex/*.ts`.
+- Run `npx convex dev --once` after schema changes.
+- shadcn/ui components ALREADY EXIST. Just import them.
+- NEVER run scaffolding commands.
+- Port: 3000, Dev command: npm run dev""",
+}
+
+PERSONA_CORE_SKILL: dict[str, str] = {
+    "frontend": "frontend-design",
+    "backend": "backend-dev",
+}
+
 
 def _get_lsp_bridge_script() -> Optional[str]:
     global _lsp_bridge_script
@@ -133,9 +210,33 @@ def _build_system_prompt(persona: str, template_name: str, model: Optional[str] 
     dev_cmd = template.dev_cmd if template else "npm run dev"
     default_port = template.default_port if template else 3000
 
+    structure = TEMPLATE_STRUCTURES.get(template_name)
+    if structure:
+        parts.append(f"\n\n{structure}")
+    else:
+        parts.append(
+            f"\n\n--- ENVIRONMENT ---\nTemplate: {template_name}\nWorking directory: {workdir}\nDev command: {dev_cmd}\nDefault port: {default_port}"
+        )
+
+    # 3. Core persona skill (embedded to reduce startup rounds)
+    core_skill_name = PERSONA_CORE_SKILL.get(persona)
+    if core_skill_name:
+        core_skill = _load_skill_content(base_dir, core_skill_name)
+        if core_skill:
+            parts.append(f"\n\n--- {core_skill_name.upper()} ---\n\n{core_skill}")
+
+    # 4. Fast-start reminder
     parts.append(
-        f"\n\n--- ENVIRONMENT ---\nTemplate: {template_name}\nWorking directory: {workdir}\nDev command: {dev_cmd}\nDefault port: {default_port}"
+        "\n\n--- FAST START ---\nThe template scaffold is already known. Do NOT call workspace_info() for broad exploration. Read project.md, load only needed framework skills, then start writing code."
     )
+
+    # 5. Available skills list
+    skills = _list_available_skills(base_dir)
+    if skills:
+        skill_lines = "\n".join(f"- `{name}`: {desc}" for name, desc in skills)
+        parts.append(
+            f'\n\n--- AVAILABLE SKILLS ---\nUse load_skill("name") to load focused guidance:\n{skill_lines}'
+        )
 
     return "".join(parts)
 
@@ -155,6 +256,32 @@ def _load_skill_content(base_dir: str, name: str) -> Optional[str]:
                 m = re.match(r"^---\n[\s\S]*?\n---\n([\s\S]*)$", content)
                 return m.group(1).strip() if m else content
     return None
+
+
+def _list_available_skills(base_dir: str) -> list[tuple[str, str]]:
+    skills_dir = os.path.join(base_dir, "skills")
+    if not os.path.isdir(skills_dir):
+        return []
+
+    out: list[tuple[str, str]] = []
+    for root, _, files in os.walk(skills_dir):
+        for f in files:
+            if not f.endswith(".md") or f == "index.md":
+                continue
+            path = os.path.join(root, f)
+            with open(path) as fh:
+                content = fh.read()
+            frontmatter = re.match(r"^---\n([\s\S]*?)\n---\n", content)
+            desc = ""
+            if frontmatter:
+                m = re.search(r"^description:\s*(.+)$", frontmatter.group(1), re.MULTILINE)
+                if m:
+                    desc = m.group(1).strip()
+            name = f.replace(".md", "").replace("_", "-")
+            out.append((name, desc or "No description"))
+
+    out.sort(key=lambda x: x[0])
+    return out
 
 
 # --- Tool definitions ---
@@ -230,6 +357,8 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
             lsp_port=lsp_port,
             project_id=req.project_id,
             workdir=workdir + "/" if not workdir.endswith("/") else workdir,
+            template_name=req.template_name or "",
+            persona=req.persona,
         )
 
         yield {"type": "agent_start", "persona": req.persona}

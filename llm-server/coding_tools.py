@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from e2b import Sandbox
 
 from r2_client import r2_put, r2_delete, to_relative_path
-from e2b_client import get_preview_url
+from e2b_client import get_preview_url, get_template
 
 log = logging.getLogger("coding-tools")
 
@@ -39,6 +39,8 @@ class ToolContext:
     lsp_port: Optional[int] = None
     project_id: str = ""
     workdir: str = "/home/user/app/"
+    template_name: str = ""
+    persona: str = ""
 
 
 @dataclass
@@ -540,6 +542,19 @@ async def _dispatch(sandbox: Sandbox, tool_name: str, args: dict, ctx: ToolConte
     # ===== Workspace =====
 
     if tool_name == "workspace_info":
+        # Frontend templates are already documented in the system prompt.
+        # Returning a compact reminder avoids wasted exploration rounds.
+        if ctx.persona == "frontend" and ctx.template_name:
+            template = get_template(ctx.template_name)
+            if template:
+                return {
+                    "template": template.name,
+                    "workdir": template.workdir,
+                    "default_port": template.default_port,
+                    "dev_command": template.dev_cmd,
+                    "note": "Template structure is already in your prompt. Skip workspace exploration and start coding after reading project.md.",
+                }
+
         max_depth = args.get("max_depth", 3)
         info = {}
 

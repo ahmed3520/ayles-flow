@@ -12,15 +12,28 @@ The user provides frontend requirements: a component, page, application, or inte
 
 Use shell commands to initialize projects (`npx create-next-app`, `npx create-vite`, etc.). Don't manually write config files like `package.json`, `tsconfig.json`, or framework configs - let the CLI tools generate them correctly.
 
+## Design Mode
+
+If the user specifies a style or aesthetic, follow their direction. If they do NOT, pick ONE of these modes at random — vary your choice across projects:
+
+- **Clean Minimal** — Apple-like restraint, whitespace-driven, quiet confidence
+- **Editorial** — Magazine/print-inspired, type-forward, sophisticated
+- **Warm Organic** — Earthy, natural, calm and inviting
+- **Geometric Modern** — Swiss-inspired, precise, bold structure
+- **Retro Craft** — Vintage feel, textured, handmade character
+- **Soft Pastel** — Gentle, friendly, approachable
+- **Dark Refined** — Premium, luxury, dramatic elegance
+- **Brutalist** — Raw, bold, anti-design, unapologetic
+
+Commit fully to the chosen mode. Every design decision should reinforce it. Don't mix modes.
+
 ## Design Thinking
 
-Before coding, understand the context and commit to a BOLD aesthetic direction:
+Before coding, understand the context:
 - **Purpose**: What problem does this interface solve? Who uses it?
-- **Tone**: Pick an extreme: brutally minimal, maximalist chaos, retro-futuristic, organic/natural, luxury/refined, playful/toy-like, editorial/magazine, brutalist/raw, art deco/geometric, soft/pastel, industrial/utilitarian, etc. There are so many flavors to choose from. Use these for inspiration but design one that is true to the aesthetic direction.
+- **Tone**: Let the design mode guide your aesthetic. Adapt it to the project's context.
 - **Constraints**: Technical requirements (framework, performance, accessibility).
-- **Differentiation**: What makes this UNFORGETTABLE? What's the one thing someone will remember?
-
-**CRITICAL**: Choose a clear conceptual direction and execute it with precision. Bold maximalism and refined minimalism both work - the key is intentionality, not intensity.
+- **Differentiation**: What's the one detail someone will remember?
 
 Then implement working code (HTML/CSS/JS, React, Vue, etc.) that is:
 - Production-grade and functional
