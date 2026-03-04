@@ -42,10 +42,7 @@ JS_TEMPLATES = {
     "vite-convex", "nextjs-convex", "tanstack-convex", "node-base",
 }
 
-LSP_BRIDGE_PATH = "/tmp/lsp-bridge.mjs"
-LSP_BRIDGE_PORT = 7998
-
-_lsp_bridge_script: Optional[str] = None
+LSP_DAEMON_PORT = 9222
 
 TEMPLATE_STRUCTURES: dict[str, str] = {
     "nextjs": """## What's Already In Your Sandbox
@@ -125,16 +122,6 @@ PERSONA_CORE_SKILL: dict[str, str] = {
 }
 
 
-def _get_lsp_bridge_script() -> Optional[str]:
-    global _lsp_bridge_script
-    if _lsp_bridge_script is not None:
-        return _lsp_bridge_script
-    script_path = os.path.join(os.path.dirname(__file__), "..", "src", "data", "lsp-bridge-script.ts")
-    if not os.path.exists(script_path):
-        _lsp_bridge_script = ""
-        return ""
-    _lsp_bridge_script = ""
-    return ""
 
 
 # --- Request model ---
@@ -150,38 +137,55 @@ class CodingChatRequest(BaseModel):
 
 # --- LSP bridge ---
 
-def _start_lsp_bridge(sandbox, template_name: Optional[str]) -> Optional[int]:
-    """Start LSP bridge in sandbox. Returns port if successful, None otherwise."""
+def _start_lsp_daemon(sandbox, template_name: Optional[str], workdir: str) -> Optional[int]:
+    """Start LSP daemon in sandbox. Already baked into templates. Returns port if running."""
     if template_name and template_name not in JS_TEMPLATES:
         return None
 
     try:
-        # Check if the bridge script exists in the sandbox
-        check = sandbox.commands.run(f"test -f {LSP_BRIDGE_PATH} && echo 1 || echo 0", timeout=5)
-        if check.stdout.strip() != "1":
-            # LSP bridge script not deployed to sandbox — skip silently
-            return None
-
-        sandbox.commands.run(
-            "which typescript-language-server >/dev/null 2>&1 || npm install -g typescript-language-server typescript 2>/dev/null",
-            timeout=30,
-        )
-        sandbox.commands.run(
-            f"node {LSP_BRIDGE_PATH} > /tmp/lsp-bridge.log 2>&1 &",
+        # Check if daemon is already running
+        check = sandbox.commands.run(
+            f"curl -s -m 2 http://127.0.0.1:{LSP_DAEMON_PORT}/health 2>/dev/null",
             timeout=5,
         )
-        for _ in range(15):
+        if check.exit_code == 0 and '"ok"' in check.stdout:
+            log.info(f"[lsp] daemon already running on port {LSP_DAEMON_PORT}")
+            return LSP_DAEMON_PORT
+
+        # Daemon script is baked into templates at .lsp/daemon.mjs
+        daemon_path = f"{workdir}.lsp/daemon.mjs"
+        check = sandbox.commands.run(f"test -f {daemon_path} && echo 1 || echo 0", timeout=5)
+        if check.stdout.strip() != "1":
+            log.info("[lsp] daemon script not found in template — skipping")
+            return None
+
+        # Start the daemon (npm global bin not in default PATH)
+        sandbox.commands.run(
+            f"nohup env PATH=/home/user/.npm-global/bin:/usr/local/bin:/usr/bin:/bin node {daemon_path} {workdir} > /tmp/lsp-daemon.log 2>&1 &",
+            timeout=10,
+        )
+
+        # Wait for it to become healthy
+        for _ in range(10):
             time.sleep(0.5)
             check = sandbox.commands.run(
-                f"curl -s http://localhost:{LSP_BRIDGE_PORT}/health 2>/dev/null",
+                f"curl -s -m 2 http://127.0.0.1:{LSP_DAEMON_PORT}/health 2>/dev/null",
+                timeout=5,
             )
             if check.exit_code == 0 and '"ok"' in check.stdout:
-                return LSP_BRIDGE_PORT
+                log.info(f"[lsp] daemon started on port {LSP_DAEMON_PORT}")
+                # Pre-warm: query an existing file to boot the TS server now
+                # (cold start takes ~7s, subsequent queries ~1s)
+                sandbox.commands.run(
+                    f"nohup curl -s -m 15 'http://127.0.0.1:{LSP_DAEMON_PORT}/diagnostics?file={workdir}src/app/page.tsx' > /dev/null 2>&1 &",
+                    timeout=5,
+                )
+                return LSP_DAEMON_PORT
 
-        log.warning("LSP bridge failed to start within timeout")
+        log.warning("[lsp] daemon failed to start within timeout")
         return None
     except Exception as e:
-        log.warning(f"LSP bridge error: {e}")
+        log.warning(f"[lsp] daemon error: {e}")
         return None
 
 
@@ -341,13 +345,13 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
         sandbox, _ = reconnect_sandbox(req.sandbox_id)
         yield {"type": "sandbox_status", "status": "ready", "sandboxId": req.sandbox_id}
 
-        # 2. Start LSP bridge
-        lsp_port = _start_lsp_bridge(sandbox, req.template_name)
-        if lsp_port:
-            log.info(f"[coding:{req.persona}] LSP bridge on port {lsp_port}")
-
         template = get_template(req.template_name or "vite")
         workdir = template.workdir if template else "/home/user/app"
+
+        # 2. Start LSP daemon (baked into templates)
+        lsp_port = _start_lsp_daemon(sandbox, req.template_name, workdir)
+        if lsp_port:
+            log.info(f"[coding:{req.persona}] LSP daemon on port {lsp_port}")
 
         # Tool context — events are collected and yielded by the generator
         event_queue: asyncio.Queue = asyncio.Queue()

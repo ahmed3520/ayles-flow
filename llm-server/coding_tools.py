@@ -95,7 +95,9 @@ def _shell_escape(s: str) -> str:
     return s.replace("'", "'\\''")
 
 
-LSP_EXTS = {"ts", "tsx", "js", "jsx"}
+LSP_EXTS = {"ts", "tsx", "js", "jsx", "css", "scss", "less", "html", "json", "py"}
+
+MAX_LSP_DIAGNOSTICS = 5
 
 
 def _get_lsp_diagnostics(sandbox: Sandbox, lsp_port: Optional[int], file_path: str) -> Optional[str]:
@@ -106,28 +108,33 @@ def _get_lsp_diagnostics(sandbox: Sandbox, lsp_port: Optional[int], file_path: s
         return None
 
     try:
-        payload = json.dumps({"path": file_path})
+        escaped_path = _shell_escape(file_path)
         result = sandbox.commands.run(
-            f"curl -s -m 5 -X POST http://localhost:{lsp_port}/diagnostics -H 'Content-Type: application/json' -d '{_shell_escape(payload)}'",
-            timeout=8,
+            f"curl -s -m 10 'http://127.0.0.1:{lsp_port}/diagnostics?file={escaped_path}'",
+            timeout=12,
         )
         if result.exit_code != 0 or not result.stdout.strip():
             return None
 
-        response = json.loads(result.stdout)
-        diags = response.get("diagnostics", [])
-        if not diags:
+        diags = json.loads(result.stdout)
+        if not isinstance(diags, list) or not diags:
             return None
 
         errors = [d for d in diags if d.get("severity") == "error"]
         warnings = [d for d in diags if d.get("severity") == "warning"]
+        selected = (errors + warnings)[:MAX_LSP_DIAGNOSTICS]
+        if not selected:
+            return None
+
         lines = []
-        for e in errors[:10]:
-            lines.append(f"L{e['line']}:{e['col']} ERROR: {e['message']}")
-        for w in warnings[:5]:
-            lines.append(f"L{w['line']}:{w['col']} WARNING: {w['message']}")
-        if len(diags) > 15:
-            lines.append(f"... and {len(diags) - 15} more")
+        for d in selected:
+            sev = d.get("severity", "error").upper()
+            line = d.get("line", 0)
+            col = d.get("character", 0)
+            msg = d.get("message", "")
+            lines.append(f"L{line}:{col} {sev}: {msg}")
+        if len(diags) > MAX_LSP_DIAGNOSTICS:
+            lines.append(f"... and {len(diags) - MAX_LSP_DIAGNOSTICS} more")
         return "\n".join(lines)
     except Exception:
         return None

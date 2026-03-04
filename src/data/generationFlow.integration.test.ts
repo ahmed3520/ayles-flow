@@ -568,7 +568,7 @@ describe.skipIf(!canRunConvex)(
           api.testing.createTestGeneration,
           {
             contentType: 'text',
-            modelId: 'anthropic/claude-sonnet-4.5',
+            modelId: 'anthropic/claude-sonnet-4.6',
             prompt: 'test',
           },
         )

@@ -166,7 +166,7 @@ describe('executeGeneration — OpenRouter text generation', () => {
     const node = makeNode('node-1', {
       contentType: 'text',
       prompt: 'Write a poem about space',
-      model: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-4.6',
     })
     const deps = createMockDeps([node])
     const callbacks = createMockCallbacks()
@@ -176,7 +176,7 @@ describe('executeGeneration — OpenRouter text generation', () => {
     expect(result).toBe(true)
     expect(deps.submitToOpenRouter).toHaveBeenCalledWith({
       data: {
-        model: 'anthropic/claude-sonnet-4.5',
+        model: 'anthropic/claude-sonnet-4.6',
         prompt: 'Write a poem about space',
       },
       onDelta: expect.any(Function),
@@ -254,7 +254,7 @@ describe('executeGeneration — OpenRouter text generation', () => {
     const node = makeNode('node-1', {
       contentType: 'text',
       prompt: 'Hello',
-      model: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-4.6',
     })
     const deps = createMockDeps([node], [], {
       submitToOpenRouter: vi.fn().mockRejectedValue(new Error('OpenRouter API error')),
@@ -273,7 +273,7 @@ describe('executeGeneration — OpenRouter text generation', () => {
     const node = makeNode('node-1', {
       contentType: 'text',
       prompt: 'Hello',
-      model: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-4.6',
     })
     const deps = createMockDeps([node], [], {
       submitToOpenRouter: vi.fn().mockRejectedValue(new Error('fail')),
@@ -287,7 +287,7 @@ describe('executeGeneration — OpenRouter text generation', () => {
 
   it('works for all text models', async () => {
     for (const model of [
-      'anthropic/claude-sonnet-4.5',
+      'anthropic/claude-sonnet-4.6',
       'openai/gpt-5.2',
       'google/gemini-3-flash-preview',
     ]) {
@@ -436,7 +436,7 @@ describe('executeGeneration — validation', () => {
     const node = makeNode('node-1', {
       contentType: 'text',
       prompt: 'test',
-      model: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-4.6',
     })
     const deps = createMockDeps([node])
     const callbacks = createMockCallbacks()

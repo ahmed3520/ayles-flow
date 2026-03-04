@@ -365,8 +365,8 @@ const SEED_MODELS = [
   // creditCost=0 because text models bill per token usage, not flat rate.
   // inputTokenCost / outputTokenCost = credits per 1M tokens
   {
-    falId: 'anthropic/claude-sonnet-4.5',
-    name: 'Claude Sonnet 4.5',
+    falId: 'anthropic/claude-sonnet-4.6',
+    name: 'Claude Sonnet 4.6',
     provider: 'Anthropic',
     providerType: 'openrouter',
     contentType: 'text',

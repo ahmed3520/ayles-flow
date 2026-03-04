@@ -16,7 +16,6 @@ import type {
   MessagePart,
   StreamEvent,
 } from '@/types/agent'
-import { agentChat } from '@/data/agent'
 import type { BlockNodeData } from '@/types/nodes'
 import { DEFAULT_AGENT_MODEL } from '@/config/agentModels'
 import { NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
@@ -535,148 +534,86 @@ export function useAgentChat({
           }
         }
 
-        const streamViaHttp = async () => {
-          const response = await Promise.race([
-            agentChat({
-              data: {
+        await new Promise<void>((resolve, reject) => {
+          let settled = false
+          let sawDone = false
+
+          const socket = new WebSocket(wsUrl)
+          socketRef.current = socket
+
+          const finish = (fn: () => void) => {
+            if (settled) return
+            settled = true
+            fn()
+          }
+
+          socket.onopen = () => {
+            socket.send(
+              JSON.stringify({
                 messages: historyMessages,
                 canvasState,
                 models,
                 agentModel,
                 projectId: projectId as string,
-              },
-            }),
-            new Promise<never>((_, reject) => {
-              controller.signal.addEventListener('abort', () =>
-                reject(new DOMException('Aborted', 'AbortError')),
-              )
-            }),
-          ])
-
-          const res =
-            response instanceof Response
-              ? response
-              : new Response(JSON.stringify(response))
-
-          if (!res.body) throw new Error('No response body')
-
-          const reader = res.body.getReader()
-          readerRef.current = reader
-          const decoder = new TextDecoder()
-          let buffer = ''
-
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const lines = buffer.split('\n')
-            buffer = lines.pop() || ''
-
-            for (const line of lines) {
-              if (!line.trim()) continue
-              let parsed: Record<string, unknown>
-              try {
-                parsed = JSON.parse(line) as Record<string, unknown>
-              } catch {
-                continue
-              }
-              if (parsed.type === 'ping') continue
-              handleEvent(parsed as StreamEvent)
-            }
+              }),
+            )
           }
-        }
 
-        let wsTransportFailed = false
-        try {
-          await new Promise<void>((resolve, reject) => {
-            let settled = false
-            let sawDone = false
-
-            const socket = new WebSocket(wsUrl)
-            socketRef.current = socket
-
-            const finish = (fn: () => void) => {
-              if (settled) return
-              settled = true
-              fn()
+          socket.onmessage = (msg) => {
+            if (typeof msg.data !== 'string') return
+            let parsed: Record<string, unknown>
+            try {
+              parsed = JSON.parse(msg.data) as Record<string, unknown>
+            } catch {
+              return
             }
 
-            socket.onopen = () => {
-              socket.send(
-                JSON.stringify({
-                  messages: historyMessages,
-                  canvasState,
-                  models,
-                  agentModel,
-                  projectId: projectId as string,
-                }),
-              )
+            if (parsed.type === 'ping') return
+            const event = parsed as StreamEvent
+            if (event.type === 'done') {
+              sawDone = true
             }
-
-            socket.onmessage = (msg) => {
-              if (typeof msg.data !== 'string') return
-              let parsed: Record<string, unknown>
+            handleEvent(event)
+            if (event.type === 'done') {
               try {
-                parsed = JSON.parse(msg.data) as Record<string, unknown>
-              } catch {
-                return
-              }
-
-              if (parsed.type === 'ping') return
-              const event = parsed as StreamEvent
-              if (event.type === 'done') {
-                sawDone = true
-              }
-              handleEvent(event)
-              if (event.type === 'done') {
-                try {
-                  socket.close(1000, 'done')
-                } catch {
-                  // ignore
-                }
-              }
-            }
-
-            socket.onerror = () => {
-              finish(() => reject(new Error('WebSocket connection error')))
-            }
-
-            socket.onclose = (ev) => {
-              socketRef.current = null
-              if (controller.signal.aborted) {
-                finish(() => reject(new DOMException('Aborted', 'AbortError')))
-                return
-              }
-              if (sawDone) {
-                finish(resolve)
-                return
-              }
-              finish(() =>
-                reject(
-                  new Error(
-                    `WebSocket closed (${ev.code})${ev.reason ? `: ${ev.reason}` : ''}`,
-                  ),
-                ),
-              )
-            }
-
-            controller.signal.addEventListener('abort', () => {
-              try {
-                socket.close(1000, 'aborted')
+                socket.close(1000, 'done')
               } catch {
                 // ignore
               }
-            })
-          })
-        } catch (wsErr) {
-          if ((wsErr as Error).name === 'AbortError') throw wsErr
-          wsTransportFailed = true
-          console.warn('WebSocket transport failed; falling back to HTTP stream', wsErr)
-        }
+            }
+          }
 
-        if (wsTransportFailed && !controller.signal.aborted) {
-          await streamViaHttp()
-        }
+          socket.onerror = () => {
+            finish(() => reject(new Error('WebSocket connection error')))
+          }
+
+          socket.onclose = (ev) => {
+            socketRef.current = null
+            if (controller.signal.aborted) {
+              finish(() => reject(new DOMException('Aborted', 'AbortError')))
+              return
+            }
+            if (sawDone) {
+              finish(resolve)
+              return
+            }
+            finish(() =>
+              reject(
+                new Error(
+                  `WebSocket closed (${ev.code})${ev.reason ? `: ${ev.reason}` : ''}`,
+                ),
+              ),
+            )
+          }
+
+          controller.signal.addEventListener('abort', () => {
+            try {
+              socket.close(1000, 'aborted')
+            } catch {
+              // ignore
+            }
+          })
+        })
 
         // Save assistant message to Convex (skip if aborted)
         if (abortRef.current === controller) {

@@ -8,9 +8,9 @@ import type { BenchmarkModel, ScenarioScore } from './types'
 
 const MODELS: Array<BenchmarkModel> = [
   {
-    id: 'claude-sonnet-4.5',
-    label: 'Claude 4.5',
-    openRouterId: 'anthropic/claude-sonnet-4.5',
+    id: 'claude-sonnet-4.6',
+    label: 'Claude 4.6',
+    openRouterId: 'anthropic/claude-sonnet-4.6',
   },
   { id: 'gpt-4.1', label: 'GPT 4.1', openRouterId: 'openai/gpt-4.1' },
   {
