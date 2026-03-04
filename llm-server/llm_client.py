@@ -168,18 +168,24 @@ async def stream_chat(
         tool_calls_in_progress: dict[int, dict] = {}
         reasoning_content = ""
         reasoning_details: list[dict] = []
-        last_yield = time.monotonic()
-        # Wrap stream with heartbeat — send ping every 15s to keep connection alive
+
+        # Heartbeat: yield pings while waiting for LLM chunks without cancelling the stream
+        pending_next = None
         stream_iter = stream.__aiter__()
         while True:
-            try:
-                chunk = await asyncio.wait_for(stream_iter.__anext__(), timeout=15.0)
-            except StopAsyncIteration:
-                break
-            except asyncio.TimeoutError:
-                # No data for 15s — send keepalive so proxies don't kill the connection
+            if pending_next is None:
+                pending_next = asyncio.ensure_future(stream_iter.__anext__())
+            done, _ = await asyncio.wait({pending_next}, timeout=15.0)
+            if not done:
+                # No chunk in 15s — send keepalive, do NOT cancel the pending read
                 yield {"type": "ping"}
                 continue
+            try:
+                chunk = pending_next.result()
+            except StopAsyncIteration:
+                break
+            finally:
+                pending_next = None
             if hasattr(chunk, 'usage') and chunk.usage:
                 u = chunk.usage
                 cached_tokens = 0
