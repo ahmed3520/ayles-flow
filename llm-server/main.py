@@ -17,11 +17,14 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 import llm_client
+from session_runtime import serve_resumable_websocket
+from stream_store import SessionManager
 
 # ─── Config ──────────────────────────────────────────────────────────
 
@@ -29,6 +32,14 @@ logging.basicConfig(level=logging.INFO, format="[llm-server] %(message)s")
 log = logging.getLogger("llm-server")
 
 app = FastAPI(title="Ayles LLM Server", version="1.0.0")
+chat_session_manager = SessionManager()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ─── Request model ───────────────────────────────────────────────────
@@ -64,12 +75,8 @@ async def chat_stream(req: ChatRequest):
 
 @app.websocket("/v1/chat/ws")
 async def chat_stream_ws(websocket: WebSocket):
-    """Streaming chat endpoint over WebSocket."""
-    await websocket.accept()
-    try:
-        payload = await websocket.receive_json()
-        req = ChatRequest(**payload)
-
+    """Streaming chat endpoint over resumable WebSocket."""
+    async def chat_event_stream(req: ChatRequest):
         async for event in llm_client.stream_chat(
             req.messages,
             model=req.model,
@@ -77,20 +84,18 @@ async def chat_stream_ws(websocket: WebSocket):
             max_tokens=req.max_tokens,
             temperature=req.temperature,
         ):
-            await websocket.send_json(event)
-    except WebSocketDisconnect:
-        log.info("chat/ws disconnected")
-    except Exception as e:
-        log.error(f"chat/ws error: {e}")
-        try:
-            await websocket.send_json({"type": "error", "error": str(e)})
-        except Exception:
-            pass
-    finally:
-        try:
-            await websocket.close()
-        except Exception:
-            pass
+            yield event
+
+    await serve_resumable_websocket(
+        websocket,
+        session_manager=chat_session_manager,
+        request_model=ChatRequest,
+        event_stream_factory=chat_event_stream,
+        log=log,
+        stream_label="chat",
+        error_event_factory=lambda message: {"type": "error", "error": message},
+        cancelled_event_factory=lambda: {"type": "error", "error": "Request cancelled"},
+    )
 
 
 # ─── Non-streaming endpoint ─────────────────────────────────────────
@@ -109,6 +114,36 @@ async def chat(req: ChatRequest):
     except Exception as e:
         log.error(f"chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class StreamRequest(BaseModel):
+    streamId: str
+
+
+@app.get("/v1/chat/stream/{stream_id}")
+async def chat_stream_status(stream_id: str):
+    state = chat_session_manager.get(stream_id)
+    if not state:
+        return JSONResponse({"exists": False})
+    return JSONResponse(
+        {
+            "exists": True,
+            "done": state.done,
+            "eventCount": len(state.events),
+            "connected": state.connected,
+            "nextSeq": state.next_seq,
+        },
+    )
+
+
+@app.post("/v1/chat/cancel")
+async def cancel_chat_stream(req: StreamRequest):
+    state = chat_session_manager.get(req.streamId)
+    if not state:
+        return JSONResponse({"ok": False, "reason": "not found"})
+    state.cancel()
+    log.info(f"chat stream cancelled {req.streamId}")
+    return JSONResponse({"ok": True})
 
 
 # ─── Agent & Sandbox routers ─────────────────────────────────────────

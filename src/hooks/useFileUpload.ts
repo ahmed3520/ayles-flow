@@ -2,7 +2,11 @@ import { useState } from 'react'
 import { useMutation } from 'convex/react'
 
 import { api } from '../../convex/_generated/api'
-import type { UploadContentCategory, UploadState } from '@/types/uploads'
+import type {
+  UploadContentCategory,
+  UploadMetadata,
+  UploadState,
+} from '@/types/uploads'
 import { extractMetadata } from '@/utils/metadataExtraction'
 import { validateFile, validateImage } from '@/utils/uploadValidation'
 
@@ -10,6 +14,7 @@ type UploadResult = {
   uploadId: string
   storageId: string
   url: string
+  metadata: UploadMetadata
 }
 
 export function useFileUpload() {
@@ -79,6 +84,7 @@ export function useFileUpload() {
         uploadId: saveResult.uploadId as string,
         storageId,
         url: saveResult.url || '',
+        metadata,
       }
     } catch (error) {
       setUploadState({

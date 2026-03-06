@@ -8,6 +8,7 @@ import type { Edge, Node } from '@xyflow/react'
 import type { Id } from '../../convex/_generated/dataModel'
 import type {
   AgentAction,
+  AgentChatInput,
   AvailableModel,
   CanvasEdge,
   CanvasNode,
@@ -19,7 +20,13 @@ import type {
 import type { BlockNodeData } from '@/types/nodes'
 import { DEFAULT_AGENT_MODEL } from '@/config/agentModels'
 import { NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
+import { createAgentStreamAccumulator } from '@/utils/agentStreamAccumulator'
 import { generateResearchPdf } from '@/utils/pdfGeneration'
+import {
+  cancelStream,
+  fetchStreamStatus,
+  runResumableStream,
+} from '@/utils/resumableStream'
 
 type UseAgentChatOptions = {
   projectId: Id<'projects'>
@@ -50,8 +57,55 @@ export function useAgentChat({
   const [toolStatus, setToolStatus] = useState<string | null>(null)
   const [agentModel, setAgentModel] = useState(DEFAULT_AGENT_MODEL)
   const abortRef = useRef<AbortController | null>(null)
-  const readerRef = useRef<ReadableStreamDefaultReader | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
+  const streamIdRef = useRef<string | null>(null)
+  const eventIndexRef = useRef(0)
+  const isResumingRef = useRef(false)
+
+  const streamStorageKey = `agent-stream:${projectId as string}`
+
+  const persistStream = useCallback(
+    (streamId: string | null, eventIndex = 0, chatId?: string) => {
+      streamIdRef.current = streamId
+      eventIndexRef.current = eventIndex
+      if (streamId) {
+        localStorage.setItem(streamStorageKey, JSON.stringify({ streamId, eventIndex, chatId }))
+      } else {
+        localStorage.removeItem(streamStorageKey)
+      }
+    },
+    [streamStorageKey],
+  )
+
+  const getPersistedStream = useCallback((): { streamId: string; eventIndex: number; chatId?: string } | null => {
+    try {
+      const raw = localStorage.getItem(streamStorageKey)
+      if (!raw) return null
+      return JSON.parse(raw) as { streamId: string; eventIndex: number; chatId?: string }
+    } catch {
+      return null
+    }
+  }, [streamStorageKey])
+
+  const getHttpBase = useCallback(() => {
+    const raw =
+      ((import.meta as any).env.VITE_LLM_SERVER_URL as string | undefined)
+      || (window.location.hostname === 'localhost'
+        ? 'http://localhost:9400'
+        : 'https://lm.aylesflow.com')
+    return raw.replace(/\/$/, '')
+  }, [])
+
+  const getWsBase = useCallback(() => {
+    const raw =
+      ((import.meta as any).env.VITE_LLM_WS_URL as string | undefined)
+      || ((import.meta as any).env.VITE_LLM_SERVER_URL as string | undefined)
+      || (window.location.hostname === 'localhost'
+        ? 'ws://localhost:9400'
+        : 'wss://lm.aylesflow.com')
+    const wsBase = raw.startsWith('ws') ? raw : raw.replace(/^http/i, 'ws')
+    return wsBase.replace(/\/$/, '')
+  }, [])
   const loadedChatRef = useRef<string | null>(null)
   const activeChatIdRef = useRef<Id<'chats'> | null>(null)
   activeChatIdRef.current = activeChatId
@@ -95,6 +149,11 @@ export function useAgentChat({
       return
     }
 
+    // Avoid clobbering in-progress streamed UI with stale DB snapshot.
+    if (streamingChatId != null && streamingChatId === activeChatId) {
+      return
+    }
+
     if (savedMessages && loadedChatRef.current !== activeChatId) {
       loadedChatRef.current = activeChatId
       setMessages(
@@ -108,7 +167,7 @@ export function useAgentChat({
         })),
       )
     }
-  }, [activeChatId, savedMessages])
+  }, [activeChatId, savedMessages, streamingChatId])
 
   // PDF creation: async, client-side via jspdf + Convex upload
   const createPdfFromAction = useCallback(
@@ -320,12 +379,171 @@ export function useAgentChat({
     [activeChatId, chatList, removeChat],
   )
 
-  // Send a message to the agent
+  const isFatalStreamEvent = useCallback((event: StreamEvent) => {
+    return event.type === 'error'
+      && (
+        event.message.includes('expired')
+        || event.message.includes('not found')
+      )
+  }, [])
+
+  const runStreamSession = useCallback(
+    async ({
+      chatId,
+      initialPayload,
+      resume,
+      assistantPlaceholder,
+      errorMessage,
+    }: {
+      chatId: Id<'chats'>
+      initialPayload?: AgentChatInput
+      resume?: {
+        streamId: string
+        afterSeq: number
+      }
+      assistantPlaceholder: 'always' | 'if-missing'
+      errorMessage: string
+    }) => {
+      setStreamingChatId(chatId)
+      const controller = new AbortController()
+      abortRef.current = controller
+
+      if (assistantPlaceholder === 'always') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '',
+            actions: [],
+            createdAt: Date.now(),
+          },
+        ])
+      } else {
+        setMessages((prev) => {
+          const last = prev.at(-1)
+          if (last?.role === 'assistant') return prev
+          return [
+            ...prev,
+            {
+              role: 'assistant' as const,
+              content: '',
+              actions: [],
+              createdAt: Date.now(),
+            },
+          ]
+        })
+      }
+
+      const isActive = () => activeChatIdRef.current === chatId
+      const updateAssistant = (updates: Partial<ChatMessage>) => {
+        if (!isActive()) return
+        setMessages((prev) => {
+          const updated = [...prev]
+          const last = updated.at(-1)
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, ...updates }
+          } else {
+            updated.push({
+              role: 'assistant',
+              content: '',
+              actions: [],
+              createdAt: Date.now(),
+              ...updates,
+            })
+          }
+          return updated
+        })
+      }
+      const updateToolStatus = (status: string | null) => {
+        if (isActive()) setToolStatus(status)
+      }
+
+      const streamAccumulator = createAgentStreamAccumulator({
+        updateAssistant,
+        setToolStatus: updateToolStatus,
+        applyAction,
+        createPdfFromAction,
+      })
+
+      let wasAborted = false
+      try {
+        await runResumableStream<StreamEvent>({
+          wsUrl: `${getWsBase()}/v1/agent/ws`,
+          initialPayload,
+          resume,
+          controller,
+          socketRef,
+          onEvent: streamAccumulator.handleEvent,
+          onStreamReady: ({ streamId, afterSeq }) => {
+            persistStream(streamId, afterSeq, chatId)
+          },
+          onSequence: ({ streamId, seq }) => {
+            persistStream(streamId ?? streamIdRef.current, seq, chatId)
+          },
+          onReconnect: (attempt, maxRetries) => {
+            updateToolStatus(`Reconnecting (${attempt}/${maxRetries})...`)
+          },
+          isFatalEvent: isFatalStreamEvent,
+        })
+
+        const snapshot = streamAccumulator.snapshot()
+        const hasAssistantPayload = snapshot.content
+          || snapshot.actions.length > 0
+          || snapshot.parts.length > 0
+
+        if (abortRef.current === controller && hasAssistantPayload) {
+          await sendMessage({
+            chatId,
+            role: 'assistant',
+            content: snapshot.content,
+            actions: snapshot.actions.length > 0 ? snapshot.actions : undefined,
+            parts: snapshot.parts.length > 0 ? snapshot.parts : undefined,
+          })
+        }
+      } catch (err) {
+        wasAborted = (err as Error).name === 'AbortError'
+        if (!wasAborted && abortRef.current === controller) {
+          const message = err instanceof Error ? err.message : errorMessage
+          setMessages((prev) => {
+            const updated = [...prev]
+            const last = updated.at(-1)
+            if (last?.role === 'assistant') {
+              updated[updated.length - 1] = {
+                ...last,
+                content: `Error: ${message}`,
+              }
+            }
+            return updated
+          })
+        }
+      } finally {
+        socketRef.current?.close(1000, 'cleanup')
+        socketRef.current = null
+        if (!wasAborted) {
+          persistStream(null)
+        }
+        isResumingRef.current = false
+        if (abortRef.current === controller) {
+          setStreamingChatId(null)
+          setToolStatus(null)
+          abortRef.current = null
+        }
+      }
+    },
+    [
+      applyAction,
+      createPdfFromAction,
+      getWsBase,
+      isFatalStreamEvent,
+      persistStream,
+      sendMessage,
+    ],
+  )
+
   const send = useCallback(
     async (content: string) => {
       if (!content.trim() || (streamingChatId != null && streamingChatId === activeChatId)) return
 
-      // Auto-create a chat if none exists
       let chatId = activeChatId
       if (!chatId) {
         chatId = await createChat({ projectId })
@@ -340,344 +558,137 @@ export function useAgentChat({
       }
       setMessages((prev) => [...prev, userMsg])
 
-      // Save user message to Convex
       await sendMessage({
         chatId,
         role: 'user',
         content,
       })
 
-      // Auto-title: use first message as chat title (truncated)
       if (messagesRef.current.length === 0) {
         const title =
           content.length > 50 ? content.slice(0, 47) + '...' : content
         await updateChatTitle({ chatId, title })
       }
 
-      setStreamingChatId(chatId)
-      const controller = new AbortController()
-      abortRef.current = controller
+      const currentMsgs = messagesRef.current
+      const alreadyHasUserMsg = currentMsgs.length > 0
+        && currentMsgs[currentMsgs.length - 1].role === 'user'
+        && currentMsgs[currentMsgs.length - 1].content === content
 
-      // Prepare assistant message placeholder
-      const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: '',
-        actions: [],
-        createdAt: Date.now(),
-      }
-      setMessages((prev) => [...prev, assistantMsg])
+      const historyMessages = (alreadyHasUserMsg ? currentMsgs : [...currentMsgs, userMsg])
+        .slice(-20)
+        .map((message) => ({ role: message.role, content: message.content }))
 
-      try {
-        // Build the messages history for context (last 20 messages)
-        // messagesRef.current may already include userMsg after the React re-render
-        // triggered by setMessages + the awaits above. Only append if it's missing.
-        const currentMsgs = messagesRef.current
-        const alreadyHasUserMsg = currentMsgs.length > 0 &&
-          currentMsgs[currentMsgs.length - 1].role === 'user' &&
-          currentMsgs[currentMsgs.length - 1].content === content
-        const historyMessages = (alreadyHasUserMsg ? currentMsgs : [...currentMsgs, userMsg])
-          .slice(-20)
-          .map((m) => ({ role: m.role, content: m.content }))
+      persistStream(null)
 
-        const canvasState = getCanvasState()
-
-        const rawWsBase =
-          ((import.meta as any).env.VITE_LLM_WS_URL as string | undefined)
-          || ((import.meta as any).env.VITE_LLM_SERVER_URL as string | undefined)
-          || (window.location.hostname === 'localhost'
-            ? 'ws://localhost:9400'
-            : 'wss://lm.aylesflow.com')
-        const wsBase = rawWsBase.startsWith('ws')
-          ? rawWsBase
-          : rawWsBase.replace(/^http/i, 'ws')
-        const wsUrl = `${wsBase.replace(/\/$/, '')}/v1/agent/ws`
-
-        let fullContent = ''
-        const allActions: Array<AgentAction> = []
-        const allParts: Array<MessagePart> = []
-
-        // Only update UI if this stream's chat is still the active one
-        const isActive = () => activeChatIdRef.current === chatId
-
-        // Helper to update the last assistant message
-        const updateAssistant = (
-          updates: Partial<ChatMessage>,
-        ) => {
-          if (!isActive()) return
-          setMessages((prev) => {
-            const updated = [...prev]
-            const last = updated.at(-1)
-            if (last?.role === 'assistant') {
-              updated[updated.length - 1] = { ...last, ...updates }
-            }
-            return updated
-          })
-        }
-
-        const handleEvent = (event: StreamEvent) => {
-          switch (event.type) {
-            case 'text_delta': {
-              if (isActive()) setToolStatus(null)
-              fullContent += event.content
-              const lastPart = allParts.at(-1)
-              if (lastPart?.type === 'text') {
-                lastPart.content += event.content
-              } else {
-                allParts.push({ type: 'text', content: event.content })
-              }
-              updateAssistant({
-                content: fullContent,
-                parts: [...allParts],
-              })
-              break
-            }
-
-            case 'reasoning': {
-              const last = allParts.at(-1)
-              if (last?.type === 'reasoning') {
-                last.content += event.content
-              } else {
-                allParts.push({ type: 'reasoning', content: event.content })
-              }
-              updateAssistant({ parts: [...allParts] })
-              break
-            }
-
-            case 'tool_status':
-              if (isActive()) setToolStatus(event.status)
-              break
-
-            case 'tool_start':
-              allParts.push({
-                type: 'tool_call',
-                tool: event.tool,
-                args: event.args,
-                status: 'pending',
-              })
-              updateAssistant({ parts: [...allParts] })
-              break
-
-            case 'tool_call': {
-              if (isActive()) setToolStatus(null)
-              let matched = false
-              for (let idx = allParts.length - 1; idx >= 0; idx--) {
-                const p = allParts[idx]
-                if (p.type === 'tool_call' && p.status === 'pending' && p.tool === event.tool) {
-                  allParts[idx] = { ...p, args: event.args, status: 'done', error: event.error }
-                  matched = true
-                  break
-                }
-              }
-              if (!matched) {
-                for (let idx = allParts.length - 1; idx >= 0; idx--) {
-                  const p = allParts[idx]
-                  if (p.type === 'tool_call' && p.status === 'pending') {
-                    allParts[idx] = { ...p, args: event.args, status: 'done', error: event.error }
-                    matched = true
-                    break
-                  }
-                }
-              }
-              if (!matched) {
-                allParts.push({ type: 'tool_call', tool: event.tool, args: event.args, status: 'done', error: event.error })
-              }
-              updateAssistant({ parts: [...allParts] })
-              break
-            }
-
-            case 'action': {
-              if (isActive()) setToolStatus(null)
-              if (event.action.type === 'create_pdf') {
-                createPdfFromAction(event.action)
-                const slim = { ...event.action, markdown: '[content]' } as AgentAction
-                allActions.push(slim)
-                allParts.push({ type: 'action', action: slim })
-              } else {
-                applyAction(event.action)
-                allActions.push(event.action)
-                allParts.push({ type: 'action', action: event.action })
-              }
-              updateAssistant({
-                actions: [...allActions],
-                parts: [...allParts],
-              })
-              break
-            }
-
-            case 'resources':
-              if (isActive()) setToolStatus(null)
-              allParts.push({ type: 'resources', sources: event.sources })
-              updateAssistant({ parts: [...allParts] })
-              break
-
-            case 'error': {
-              fullContent += `\n\nError: ${event.message}`
-              const errLastPart = allParts.at(-1)
-              if (errLastPart?.type === 'text') {
-                errLastPart.content += `\n\nError: ${event.message}`
-              } else {
-                allParts.push({
-                  type: 'text',
-                  content: `\n\nError: ${event.message}`,
-                })
-              }
-              updateAssistant({
-                content: fullContent,
-                parts: [...allParts],
-              })
-              break
-            }
-
-            case 'done':
-              if (isActive()) setToolStatus(null)
-              break
-          }
-        }
-
-        await new Promise<void>((resolve, reject) => {
-          let settled = false
-          let sawDone = false
-
-          const socket = new WebSocket(wsUrl)
-          socketRef.current = socket
-
-          const finish = (fn: () => void) => {
-            if (settled) return
-            settled = true
-            fn()
-          }
-
-          socket.onopen = () => {
-            socket.send(
-              JSON.stringify({
-                messages: historyMessages,
-                canvasState,
-                models,
-                agentModel,
-                projectId: projectId as string,
-              }),
-            )
-          }
-
-          socket.onmessage = (msg) => {
-            if (typeof msg.data !== 'string') return
-            let parsed: Record<string, unknown>
-            try {
-              parsed = JSON.parse(msg.data) as Record<string, unknown>
-            } catch {
-              return
-            }
-
-            if (parsed.type === 'ping') return
-            const event = parsed as StreamEvent
-            if (event.type === 'done') {
-              sawDone = true
-            }
-            handleEvent(event)
-            if (event.type === 'done') {
-              try {
-                socket.close(1000, 'done')
-              } catch {
-                // ignore
-              }
-            }
-          }
-
-          socket.onerror = () => {
-            finish(() => reject(new Error('WebSocket connection error')))
-          }
-
-          socket.onclose = (ev) => {
-            socketRef.current = null
-            if (controller.signal.aborted) {
-              finish(() => reject(new DOMException('Aborted', 'AbortError')))
-              return
-            }
-            if (sawDone) {
-              finish(resolve)
-              return
-            }
-            finish(() =>
-              reject(
-                new Error(
-                  `WebSocket closed (${ev.code})${ev.reason ? `: ${ev.reason}` : ''}`,
-                ),
-              ),
-            )
-          }
-
-          controller.signal.addEventListener('abort', () => {
-            try {
-              socket.close(1000, 'aborted')
-            } catch {
-              // ignore
-            }
-          })
-        })
-
-        // Save assistant message to Convex (skip if aborted)
-        if (abortRef.current === controller) {
-          await sendMessage({
-            chatId,
-            role: 'assistant',
-            content: fullContent,
-            actions: allActions.length > 0 ? allActions : undefined,
-            parts: allParts.length > 0 ? allParts : undefined,
-          })
-        }
-      } catch (err) {
-        if ((err as Error).name !== 'AbortError' && abortRef.current === controller) {
-          const errMsg =
-            err instanceof Error ? err.message : 'Failed to reach agent'
-          setMessages((prev) => {
-            const updated = [...prev]
-            const last = updated.at(-1)
-            if (last?.role === 'assistant') {
-              updated[updated.length - 1] = {
-                ...last,
-                content: `Error: ${errMsg}`,
-              }
-            }
-            return updated
-          })
-        }
-      } finally {
-        readerRef.current = null
-        socketRef.current?.close(1000, 'cleanup')
-        socketRef.current = null
-        // Only clear streaming state if this is still the active stream
-        if (abortRef.current === controller) {
-          setStreamingChatId(null)
-          setToolStatus(null)
-          abortRef.current = null
-        }
-      }
+      await runStreamSession({
+        chatId,
+        assistantPlaceholder: 'always',
+        errorMessage: 'Failed to reach agent',
+        initialPayload: {
+          messages: historyMessages,
+          canvasState: getCanvasState(),
+          models,
+          agentModel,
+          projectId: projectId as string,
+        },
+      })
     },
     [
       streamingChatId,
       activeChatId,
-      projectId,
-      models,
-      agentModel,
       createChat,
+      projectId,
       sendMessage,
       updateChatTitle,
+      persistStream,
+      runStreamSession,
       getCanvasState,
-      applyAction,
-      createPdfFromAction,
+      models,
+      agentModel,
     ],
   )
 
+  const resumeStream = useCallback(
+    async (savedStreamId: string, _savedEventIndex: number, savedChatId?: string) => {
+      if (isResumingRef.current || streamingChatId != null) return
+      isResumingRef.current = true
+
+      try {
+        const status = await fetchStreamStatus(
+          `${getHttpBase()}/v1/agent/stream/${savedStreamId}`,
+        )
+        if (!status.exists || status.done) {
+          persistStream(null)
+          isResumingRef.current = false
+          return
+        }
+      } catch {
+        isResumingRef.current = false
+        return
+      }
+
+      const chatId = (savedChatId as Id<'chats'> | undefined) || activeChatIdRef.current
+      if (!chatId) {
+        isResumingRef.current = false
+        return
+      }
+
+      if (activeChatIdRef.current !== chatId) {
+        setActiveChatId(chatId)
+        activeChatIdRef.current = chatId
+      }
+
+      await runStreamSession({
+        chatId,
+        assistantPlaceholder: 'if-missing',
+        errorMessage: 'Failed to resume stream',
+        resume: {
+          streamId: savedStreamId,
+          // After a full page reload we need a full replay to rebuild UI state.
+          afterSeq: 0,
+        },
+      })
+    },
+    [streamingChatId, getHttpBase, persistStream, runStreamSession],
+  )
+
+  // StrictMode remount safety: terminate stale client sockets on unmount.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+      abortRef.current = null
+      socketRef.current?.close(1000, 'unmount')
+      socketRef.current = null
+    }
+  }, [])
+
+  // On mount: check if there's a running stream to resume (e.g. after page reload)
+  useEffect(() => {
+    const persisted = getPersistedStream()
+    if (!persisted) return
+    console.log('[ws] Found persisted stream on mount:', persisted.streamId)
+    resumeStream(persisted.streamId, persisted.eventIndex, persisted.chatId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const stopStreaming = useCallback(() => {
-    readerRef.current?.cancel()
-    readerRef.current = null
-    socketRef.current?.close(1000, 'stopped')
-    socketRef.current = null
     abortRef.current?.abort()
     abortRef.current = null
+
+    if (streamIdRef.current) {
+      cancelStream(
+        `${getHttpBase()}/v1/agent/cancel`,
+        streamIdRef.current,
+      ).catch(() => {})
+      persistStream(null)
+    }
+
+    socketRef.current?.close(1000, 'stopped')
+    socketRef.current = null
     setStreamingChatId(null)
     setToolStatus(null)
-  }, [])
+  }, [getHttpBase, persistStream])
 
   const clearChat = useCallback(async () => {
     if (!activeChatId) return

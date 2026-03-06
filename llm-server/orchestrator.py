@@ -15,12 +15,15 @@ import json
 import os
 import re
 import logging
+import uuid
 from collections import Counter
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
+
+from stream_store import SessionManager
 
 import llm_client
 from e2b_client import create_sandbox, reconnect_sandbox, get_preview_url, get_template, is_convex_template
@@ -31,6 +34,7 @@ from research import deep_research
 log = logging.getLogger("orchestrator")
 
 router = APIRouter()
+session_manager = SessionManager()
 
 MAX_TOOL_ROUNDS = 500
 CONTINUATION_PROMPT = "You were cut off mid-response. Continue building from where you stopped. Do NOT repeat work already done."
@@ -816,29 +820,162 @@ async def agent_chat(req: AgentChatRequest):
     )
 
 
+async def _run_agent_to_store(stream_id: str, state, req: AgentChatRequest):
+    """Run agent as background task, buffer all events into the stream store."""
+    try:
+        async for event in _agent_event_stream(req):
+            if event.get("type") == "ping":
+                continue
+            state.append(event)
+            if event.get("type") == "done":
+                state.mark_done()
+                return
+    except asyncio.CancelledError:
+        state.append({"type": "error", "message": "Cancelled by user"})
+    except Exception as e:
+        log.error(f"[orchestrator] stream {stream_id} error: {e}")
+        state.append({"type": "error", "message": str(e)})
+    # Ensure done is always sent
+    if not state.done:
+        state.append({"type": "done"})
+        state.mark_done()
+
+
 @router.websocket("/v1/agent/ws")
 async def agent_chat_ws(websocket: WebSocket):
-    """Orchestrator agent loop — WebSocket streaming response."""
+    """Resumable orchestrator agent — WebSocket streams from in-memory buffer.
+
+    New stream:    client sends {messages, canvasState, models, agentModel, projectId}
+    Resume stream: client sends {resume: streamId, lastIndex: N}
+    """
     await websocket.accept()
+    stream_id = None
+    connection_id = uuid.uuid4().hex
+    state = None
+
     try:
         payload = await websocket.receive_json()
-        req = AgentChatRequest(**payload)
 
-        async for event in _agent_event_stream(req):
-            await websocket.send_json(event)
+        resume_id = payload.get("resume")
+        after_seq = payload.get("afterSeq")
+        if after_seq is None:
+            after_seq = payload.get("lastIndex", 0)
+        if not isinstance(after_seq, int) or after_seq < 0:
+            after_seq = 0
+
+        if resume_id:
+            # --- Resume existing stream ---
+            state = session_manager.get(resume_id)
+            if not state:
+                await websocket.send_json({"type": "error", "message": "Stream expired or not found"})
+                await websocket.send_json({"type": "done"})
+                return
+            stream_id = resume_id
+            after_seq = min(after_seq, state.next_seq - 1)
+            log.info(f"[orchestrator] Resuming stream {stream_id} after seq {after_seq}")
+        else:
+            # --- Start new stream ---
+            req = AgentChatRequest(**payload)
+            stream_id, state = session_manager.create()
+            after_seq = 0
+            task = asyncio.create_task(_run_agent_to_store(stream_id, state, req))
+            state.task = task
+            log.info(f"[orchestrator] New stream {stream_id}")
+
+        # Claim connection ownership for this socket.
+        state.attach(connection_id)
+
+        # Tell client the stream ID so it can resume later
+        await websocket.send_json(
+            {
+                "type": "stream_id",
+                "streamId": stream_id,
+                "nextSeq": state.next_seq,
+            },
+        )
+        log.info(f"[orchestrator] Sent stream_id {stream_id}, starting event loop")
+
+        # Stream events: replay missed + live
+        while True:
+            if not state.owns_connection(connection_id):
+                log.info(f"[orchestrator] Connection superseded for stream {stream_id}")
+                try:
+                    await websocket.close(code=4001, reason="superseded")
+                except Exception:
+                    pass
+                break
+
+            # Send any buffered events
+            batch = state.replay_after(after_seq)
+            for event in batch:
+                await websocket.send_json(event)
+                after_seq = event["seq"]
+
+            if state.done:
+                log.info(f"[orchestrator] Stream {stream_id} done at seq {after_seq}")
+                break
+
+            # Wait for new events (shorter timeout to keep proxies alive)
+            await state.wait_for_new(timeout=5)
+
+            if not state.owns_connection(connection_id):
+                log.info(f"[orchestrator] Connection superseded during wait for stream {stream_id}")
+                try:
+                    await websocket.close(code=4001, reason="superseded")
+                except Exception:
+                    pass
+                break
+
+            # If no new events arrived, send ping to keep connection alive
+            if state.next_seq == after_seq + 1 and not state.done:
+                await websocket.send_json({"type": "ping"})
+
     except WebSocketDisconnect:
-        log.info("[orchestrator] websocket disconnected")
+        log.info(f"[orchestrator] WS disconnected, grace timer started for stream {stream_id}")
     except Exception as e:
-        log.error(f"[orchestrator] websocket error: {e}")
+        log.error(f"[orchestrator] WS error: {e}")
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
         except Exception:
             pass
     finally:
+        # Start grace timer — if no reconnect within 60s, agent is auto-cancelled
+        if state:
+            state.detach(connection_id)
         try:
             await websocket.close()
         except Exception:
             pass
+
+
+class StreamRequest(BaseModel):
+    streamId: str
+
+
+@router.get("/v1/agent/stream/{stream_id}")
+async def stream_status(stream_id: str):
+    """Check if a stream exists and its current state."""
+    state = session_manager.get(stream_id)
+    if not state:
+        return JSONResponse({"exists": False})
+    return JSONResponse({
+        "exists": True,
+        "done": state.done,
+        "eventCount": len(state.events),
+        "connected": state.connected,
+        "nextSeq": state.next_seq,
+    })
+
+
+@router.post("/v1/agent/cancel")
+async def cancel_stream(req: StreamRequest):
+    """Cancel a running agent stream."""
+    state = session_manager.get(req.streamId)
+    if not state:
+        return JSONResponse({"ok": False, "reason": "not found"})
+    state.cancel()
+    log.info(f"[orchestrator] Cancelled stream {req.streamId}")
+    return JSONResponse({"ok": True})
 
 
 # --- Builtin system prompt (same as STATIC_SYSTEM_PROMPT in agent-config.ts) ---

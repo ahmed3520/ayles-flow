@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 
 import type { NodeContentType } from '@/types/nodes'
-import type { UploadContentCategory } from '@/types/uploads'
+import type { UploadContentCategory, UploadMetadata } from '@/types/uploads'
 import { useFileUpload } from '@/hooks/useFileUpload'
 
 const nodeOptions: Array<{
@@ -33,6 +33,7 @@ interface SidebarProps {
     contentType: NodeContentType,
     uploadId: string,
     url: string,
+    metadata?: UploadMetadata,
   ) => void
 }
 
@@ -94,7 +95,12 @@ export default function Sidebar({ onAddNode, onAddUploadNode }: SidebarProps) {
                 const result = await uploadFile(file, category)
 
                 const contentType: NodeContentType = category === 'pdf' ? 'pdf' : category
-                onAddUploadNode(contentType, result.uploadId, result.url)
+                onAddUploadNode(
+                  contentType,
+                  result.uploadId,
+                  result.url,
+                  result.metadata,
+                )
               } catch (error) {
                 console.error('Upload failed:', error)
               }

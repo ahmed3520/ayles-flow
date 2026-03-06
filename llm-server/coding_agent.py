@@ -17,18 +17,21 @@ import time
 import logging
 from typing import Optional, AsyncGenerator
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, WebSocket
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 import llm_client
 from e2b_client import reconnect_sandbox, get_template, get_preview_url
 from coding_tools import execute_coding_tool, ToolContext
 from r2_client import r2_put_meta
+from session_runtime import serve_resumable_websocket
+from stream_store import SessionManager
 
 log = logging.getLogger("coding-agent")
 
 router = APIRouter()
+session_manager = SessionManager()
 
 # --- Config ---
 
@@ -576,24 +579,47 @@ async def coding_chat(req: CodingChatRequest):
 
 @router.websocket("/v1/coding/ws")
 async def coding_chat_ws(websocket: WebSocket):
-    """Coding agent loop — WebSocket streaming response."""
-    await websocket.accept()
-    try:
-        payload = await websocket.receive_json()
-        req = CodingChatRequest(**payload)
+    """Coding agent loop — resumable WebSocket streaming response."""
+    await serve_resumable_websocket(
+        websocket,
+        session_manager=session_manager,
+        request_model=CodingChatRequest,
+        event_stream_factory=coding_agent_loop,
+        log=log,
+        stream_label="coding",
+        error_event_factory=lambda message: {"type": "error", "message": message},
+        cancelled_event_factory=lambda: {
+            "type": "error",
+            "message": "Request cancelled — client disconnected",
+        },
+    )
 
-        async for event in coding_agent_loop(req):
-            await websocket.send_json(event)
-    except WebSocketDisconnect:
-        log.info("[coding] websocket disconnected")
-    except Exception as e:
-        log.error(f"[coding] websocket error: {e}")
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except Exception:
-            pass
-    finally:
-        try:
-            await websocket.close()
-        except Exception:
-            pass
+
+class StreamRequest(BaseModel):
+    streamId: str
+
+
+@router.get("/v1/coding/stream/{stream_id}")
+async def stream_status(stream_id: str):
+    state = session_manager.get(stream_id)
+    if not state:
+        return JSONResponse({"exists": False})
+    return JSONResponse(
+        {
+            "exists": True,
+            "done": state.done,
+            "eventCount": len(state.events),
+            "connected": state.connected,
+            "nextSeq": state.next_seq,
+        },
+    )
+
+
+@router.post("/v1/coding/cancel")
+async def cancel_stream(req: StreamRequest):
+    state = session_manager.get(req.streamId)
+    if not state:
+        return JSONResponse({"ok": False, "reason": "not found"})
+    state.cancel()
+    log.info(f"[coding] Cancelled stream {req.streamId}")
+    return JSONResponse({"ok": True})

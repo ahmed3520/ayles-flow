@@ -57,6 +57,9 @@ export type BlockNodeData = {
   resultText?: string
   imageWidth?: number
   imageHeight?: number
+  rotationDeg?: number
+  flipX?: boolean
+  flipY?: boolean
   errorMessage?: string
   outputType?: PortType
   // Upload-related fields

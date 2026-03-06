@@ -13,7 +13,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useMutation, useQuery } from 'convex/react'
-import { Bot, Check, Clock, Loader2, Undo2, Redo2 } from 'lucide-react'
+import { Bot, Check, Clock, Loader2, Redo2, Undo2 } from 'lucide-react'
 
 import { api } from '../../../convex/_generated/api'
 
@@ -26,6 +26,7 @@ import type { Connection, Edge, Node, OnConnect } from '@xyflow/react'
 import type { Id } from '../../../convex/_generated/dataModel'
 import type { BlockNodeData, NodeContentType, PortType } from '@/types/nodes'
 import type { SaveStatus } from '@/hooks/useAutoSave'
+import type { UploadMetadata } from '@/types/uploads'
 import { submitToFal } from '@/data/fal'
 import { executeGeneration } from '@/data/generationFlow'
 import { submitToOpenRouter } from '@/data/openrouter-generate'
@@ -221,8 +222,8 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
 
       // Restore dead sandboxes for website nodes
       for (const node of loadedNodes) {
-        const nd = node.data as Record<string, unknown>
-        if (nd?.contentType !== 'website' || !nd?.sandboxId) continue
+        const nd = node.data
+        if (nd.contentType !== 'website' || !nd.sandboxId) continue
 
         // Mark node as restoring
         const updateNodeData = (patch: Record<string, unknown>) =>
@@ -244,7 +245,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
           if (!reader) return
           const decoder = new TextDecoder()
           let buffer = ''
-          while (true) {
+          for (;;) {
             const { done, value } = await reader.read()
             if (done) break
             buffer += decoder.decode(value, { stream: true })
@@ -366,19 +367,80 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     [screenToFlowPosition, setNodes, pushSnapshot],
   )
 
-  const addNodeAtCenter = useCallback(
-    (contentType: NodeContentType) => {
-      if (!reactFlowWrapper.current) return
+  const getUploadNodeSize = useCallback(
+    (
+      contentType: NodeContentType,
+      metadata?: UploadMetadata,
+    ) => {
+      const defaults = NODE_DEFAULTS[contentType]
+      if (
+        contentType !== 'image' ||
+        !metadata?.width ||
+        !metadata.height
+      ) {
+        return { width: defaults.width, height: defaults.height }
+      }
 
-      pushSnapshot(nodesRef.current, edgesRef.current)
+      let width = metadata.width
+      let height = metadata.height
+      const maxDimension = 920
+      const minDimension = 80
+
+      const downscale = Math.min(1, maxDimension / width, maxDimension / height)
+      width *= downscale
+      height *= downscale
+
+      const upscale = Math.max(
+        width < minDimension ? minDimension / width : 1,
+        height < minDimension ? minDimension / height : 1,
+      )
+      width *= upscale
+      height *= upscale
+
+      if (width > maxDimension || height > maxDimension) {
+        const finalScale = Math.min(maxDimension / width, maxDimension / height)
+        width *= finalScale
+        height *= finalScale
+      }
+
+      return {
+        width: Math.round(width),
+        height: Math.round(height),
+      }
+    },
+    [],
+  )
+
+  const getCenteredViewportPosition = useCallback(
+    (
+      contentType: NodeContentType,
+      nodeSize = NODE_DEFAULTS[contentType],
+    ) => {
+      if (!reactFlowWrapper.current) return null
+
       const rect = reactFlowWrapper.current.getBoundingClientRect()
-      const position = screenToFlowPosition({
+      const center = screenToFlowPosition({
         x: rect.left + rect.width / 2,
         y: rect.top + rect.height / 2,
       })
 
-      const id = getNextId()
+      return {
+        x: center.x - nodeSize.width / 2,
+        y: center.y - nodeSize.height / 2,
+      }
+    },
+    [screenToFlowPosition],
+  )
+
+  const addNodeAtCenter = useCallback(
+    (contentType: NodeContentType) => {
       const defaults = NODE_DEFAULTS[contentType]
+      const position = getCenteredViewportPosition(contentType, defaults)
+      if (!position) return
+
+      pushSnapshot(nodesRef.current, edgesRef.current)
+
+      const id = getNextId()
       const newNode: Node<BlockNodeData> = {
         id,
         type: 'blockNode',
@@ -395,27 +457,28 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
 
       setNodes((nds) => [...nds, newNode])
     },
-    [screenToFlowPosition, setNodes, pushSnapshot],
+    [getCenteredViewportPosition, setNodes, pushSnapshot],
   )
 
   const addUploadNode = useCallback(
-    (contentType: NodeContentType, uploadId: string, url: string) => {
-      if (!reactFlowWrapper.current) return
+    (
+      contentType: NodeContentType,
+      uploadId: string,
+      url: string,
+      metadata?: UploadMetadata,
+    ) => {
+      const nodeSize = getUploadNodeSize(contentType, metadata)
+      const position = getCenteredViewportPosition(contentType, nodeSize)
+      if (!position) return
 
       pushSnapshot(nodesRef.current, edgesRef.current)
-      const rect = reactFlowWrapper.current.getBoundingClientRect()
-      const position = screenToFlowPosition({
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-      })
 
       const id = getNextId()
-      const defaults = NODE_DEFAULTS[contentType]
       const newNode: Node<BlockNodeData> = {
         id,
         type: 'blockNode',
         position,
-        style: { width: defaults.width, height: defaults.height },
+        style: nodeSize,
         data: {
           contentType,
           label: `Uploaded ${contentType}`,
@@ -425,12 +488,14 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
           uploadId,
           isUpload: true,
           resultUrl: url,
+          imageWidth: metadata?.width,
+          imageHeight: metadata?.height,
         },
       }
 
       setNodes((nds) => [...nds, newNode])
     },
-    [screenToFlowPosition, setNodes, pushSnapshot],
+    [getCenteredViewportPosition, getUploadNodeSize, setNodes, pushSnapshot],
   )
 
   const addNodeAtPosition = useCallback(

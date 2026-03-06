@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Handle,
   NodeResizer,
@@ -13,9 +13,13 @@ import {
   AlertCircle,
   ArrowUp,
   Download,
+  Eraser,
   ExternalLink,
   FileText,
+  FlipHorizontal,
+  FlipVertical,
   Globe,
+  GripHorizontal,
   Image,
   Loader2,
   Mic,
@@ -23,11 +27,14 @@ import {
   Music,
   RefreshCw,
   Rocket,
+  RotateCw,
   Smartphone,
+  Sparkles,
   StickyNote,
   Tablet,
   Ticket,
   Type,
+  Upload,
   Video,
 } from 'lucide-react'
 import { useQuery } from 'convex/react'
@@ -38,7 +45,9 @@ import PdfViewer from '../PdfViewer'
 import { useCanvasActions } from '../Canvas'
 import type { Edge, Node, NodeProps } from '@xyflow/react'
 import type { BlockNodeData, NodeContentType, PortType } from '@/types/nodes'
+import type { UploadContentCategory } from '@/types/uploads'
 import { useGenerationStatus } from '@/hooks/useGenerationStatus'
+import { useFileUpload } from '@/hooks/useFileUpload'
 import { AI_CONTENT_TYPES, NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
 import { downloadNodeResult } from '@/utils/downloadUtils'
 
@@ -83,11 +92,33 @@ const contentTypeConfig: Record<
   },
 }
 
+const REPLACE_ACCEPT_BY_TYPE: Partial<Record<NodeContentType, string>> = {
+  image: 'image/jpeg,image/png,image/webp,image/gif',
+  video: 'video/mp4,video/webm,video/quicktime',
+  audio: 'audio/mpeg,audio/wav,audio/ogg,audio/mp4',
+  music: 'audio/mpeg,audio/wav,audio/ogg,audio/mp4',
+  pdf: 'application/pdf',
+}
+
+const UPLOAD_CATEGORY_BY_TYPE: Partial<
+  Record<NodeContentType, UploadContentCategory>
+> = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  music: 'audio',
+  pdf: 'pdf',
+}
+
+type ImageToolActionState = 'remove_background' | 'upscale' | null
+
 function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
   const { setNodes } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
   const { onGenerate } = useCanvasActions()
+  const { uploadFile } = useFileUpload()
   const edges = useEdges()
+  const replaceInputRef = useRef<HTMLInputElement>(null)
   const config = contentTypeConfig[data.contentType]
   const Icon = config.icon
   const isAIBlock = AI_CONTENT_TYPES.includes(data.contentType)
@@ -138,7 +169,6 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
       [id, hasConnectedImage],
     ),
   )
-
   // Sync connected text into this node's prompt so it shows in the input
   useEffect(() => {
     if (connectedPromptText !== null && connectedPromptText !== data.prompt) {
@@ -276,11 +306,251 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
   )
 
   const defaults = NODE_DEFAULTS[data.contentType]
+  const isMediaNode = data.contentType === 'image' || data.contentType === 'video'
+  const imageResizeMinWidth = data.contentType === 'image' ? 80 : defaults.minWidth
+  const imageResizeMinHeight = data.contentType === 'image' ? 80 : defaults.minHeight
+  const nodeFrameSize = useStore(
+    useCallback(
+      (state: { nodeLookup: Map<string, Node> }) => {
+        const node = state.nodeLookup.get(id)
+        return {
+          width:
+            typeof node?.style?.width === 'number'
+              ? node.style.width
+              : defaults.width,
+          height:
+            typeof node?.style?.height === 'number'
+              ? node.style.height
+              : defaults.height,
+        }
+      },
+      [id, defaults.height, defaults.width],
+    ),
+  )
+  const rotationDeg = data.rotationDeg || 0
+  const flipX = data.flipX ? -1 : 1
+  const flipY = data.flipY ? -1 : 1
+  const mediaToolsLabel = data.contentType === 'image' ? 'Image Tools' : 'Video Tools'
+  const mediaTransformStyle = {
+    transform: `rotate(${rotationDeg}deg) scale(${flipX}, ${flipY})`,
+    transformOrigin: 'center',
+  } as const
+  const imageStyle = {
+    ...mediaTransformStyle,
+    objectFit: 'contain',
+  } as const
+  const videoStyle = {
+    ...mediaTransformStyle,
+    objectFit: 'cover',
+  } as const
 
   // Track Shift key for proportional resize
   const [isShiftHeld, setIsShiftHeld] = useState(false)
+  const keepAspectOnResize = data.contentType === 'image' || isShiftHeld
   const [downloading, setDownloading] = useState(false)
   const [deployLogs, setDeployLogs] = useState<string | null>(null)
+  const [activeImageTool, setActiveImageTool] =
+    useState<ImageToolActionState>(null)
+  const [replacing, setReplacing] = useState(false)
+  const [toolbarError, setToolbarError] = useState<string | null>(null)
+  const [mediaActionHint, setMediaActionHint] = useState('Choose action')
+
+  const getHintHandlers = useCallback(
+    (label: string) => ({
+      onMouseEnter: () => setMediaActionHint(label),
+      onFocus: () => setMediaActionHint(label),
+      onMouseLeave: () => setMediaActionHint('Choose action'),
+      onBlur: () => setMediaActionHint('Choose action'),
+    }),
+    [],
+  )
+
+  const replaceAccept = REPLACE_ACCEPT_BY_TYPE[data.contentType]
+  const replaceCategory = UPLOAD_CATEGORY_BY_TYPE[data.contentType]
+
+  const fitNodeToImageAspect = useCallback(
+    (imageWidth: number, imageHeight: number) => {
+      if (!(imageWidth > 0 && imageHeight > 0)) return
+      const aspect = imageWidth / imageHeight
+      if (!Number.isFinite(aspect) || aspect <= 0) return
+
+      setNodes((nds) =>
+        nds.map((n) => {
+          if (n.id !== id) return n
+
+          const maxDimension = 920
+          let nextWidth = imageWidth
+          let nextHeight = imageHeight
+
+          const downscale = Math.min(
+            1,
+            maxDimension / nextWidth,
+            maxDimension / nextHeight,
+          )
+          nextWidth *= downscale
+          nextHeight *= downscale
+
+          const upscale = Math.max(
+            nextWidth < imageResizeMinWidth
+              ? imageResizeMinWidth / nextWidth
+              : 1,
+            nextHeight < imageResizeMinHeight
+              ? imageResizeMinHeight / nextHeight
+              : 1,
+          )
+          nextWidth *= upscale
+          nextHeight *= upscale
+
+          if (nextWidth > maxDimension || nextHeight > maxDimension) {
+            const finalScale = Math.min(
+              maxDimension / nextWidth,
+              maxDimension / nextHeight,
+            )
+            nextWidth *= finalScale
+            nextHeight *= finalScale
+          }
+
+          return {
+            ...n,
+            style: {
+              ...n.style,
+              width: Math.round(nextWidth),
+              height: Math.round(nextHeight),
+            },
+            data: {
+              ...n.data,
+              imageWidth,
+              imageHeight,
+            },
+          }
+        }),
+      )
+    },
+    [
+      defaults.height,
+      defaults.width,
+      id,
+      imageResizeMinHeight,
+      imageResizeMinWidth,
+      setNodes,
+    ],
+  )
+
+  const resetNodeSize = useCallback(() => {
+    if (data.contentType === 'image' && data.imageWidth && data.imageHeight) {
+      fitNodeToImageAspect(data.imageWidth, data.imageHeight)
+      return
+    }
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === id
+          ? { ...n, style: { ...n.style, width: defaults.width, height: defaults.height } }
+          : n,
+      ),
+    )
+  }, [
+    data.contentType,
+    data.imageHeight,
+    data.imageWidth,
+    defaults.height,
+    defaults.width,
+    fitNodeToImageAspect,
+    id,
+    setNodes,
+  ])
+
+  const runImageTool = useCallback(
+    async (action: Exclude<ImageToolActionState, null>) => {
+      if (!data.resultUrl) return
+
+      setToolbarError(null)
+      setActiveImageTool(action)
+      try {
+        const { runFalImageTool } = await import('@/data/fal')
+        const result = await runFalImageTool({
+          data: { action, imageUrl: data.resultUrl, upscaleFactor: 2 },
+        })
+        updateData({
+          resultUrl: result.imageUrl,
+          imageWidth: result.width,
+          imageHeight: result.height,
+          generationStatus: 'completed',
+          errorMessage: undefined,
+        })
+      } catch (error) {
+        setToolbarError(
+          error instanceof Error ? error.message : 'Image action failed',
+        )
+      } finally {
+        setActiveImageTool(null)
+      }
+    },
+    [data.resultUrl, updateData],
+  )
+
+  const onReplaceFileChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      if (!file || !replaceCategory) return
+
+      setToolbarError(null)
+      setReplacing(true)
+      try {
+        const result = await uploadFile(file, replaceCategory)
+        updateData({
+          resultUrl: result.url,
+          uploadId: result.uploadId,
+          isUpload: true,
+          generationStatus: 'completed',
+          errorMessage: undefined,
+        })
+      } catch (error) {
+        setToolbarError(error instanceof Error ? error.message : 'Replace failed')
+      } finally {
+        setReplacing(false)
+        event.target.value = ''
+      }
+    },
+    [replaceCategory, uploadFile, updateData],
+  )
+
+  const onImageLoaded = useCallback(
+    (event: React.SyntheticEvent<HTMLImageElement>) => {
+      if (!data.resultUrl) return
+
+      const target = event.currentTarget
+      fitNodeToImageAspect(target.naturalWidth, target.naturalHeight)
+    },
+    [data.resultUrl, fitNodeToImageAspect],
+  )
+
+  useEffect(() => {
+    if (data.contentType !== 'image' || !data.resultUrl) return
+    const resultUrl = data.resultUrl
+    const img = new window.Image()
+    img.onload = () => {
+      fitNodeToImageAspect(img.naturalWidth, img.naturalHeight)
+    }
+    img.src = resultUrl
+  }, [data.contentType, data.resultUrl, fitNodeToImageAspect])
+
+  useEffect(() => {
+    if (data.contentType !== 'image') return
+    if (!(data.imageWidth && data.imageHeight)) return
+    const imageAspect = data.imageWidth / data.imageHeight
+    const frameAspect = nodeFrameSize.width / nodeFrameSize.height
+    if (!Number.isFinite(imageAspect) || !Number.isFinite(frameAspect)) return
+    if (Math.abs(imageAspect - frameAspect) < 0.03) return
+    fitNodeToImageAspect(data.imageWidth, data.imageHeight)
+  }, [
+    data.contentType,
+    data.imageHeight,
+    data.imageWidth,
+    fitNodeToImageAspect,
+    nodeFrameSize.height,
+    nodeFrameSize.width,
+  ])
+
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => { if (e.key === 'Shift') setIsShiftHeld(true) }
     const onUp = (e: KeyboardEvent) => { if (e.key === 'Shift') setIsShiftHeld(false) }
@@ -306,22 +576,24 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
           ? `rounded-xl bg-zinc-900 border border-zinc-800/60 border-l-[3px] border-l-violet-500 shadow-[0_1px_3px_rgba(0,0,0,0.4)] hover:border-zinc-700/60 hover:border-l-violet-400 ${selected ? 'ring-1 ring-violet-500/30 border-zinc-700/60' : ''}`
           : isWebsite
           ? `rounded-xl bg-zinc-900 border border-emerald-800/40 shadow-[0_2px_8px_rgba(0,0,0,0.5)] hover:border-emerald-700/50 ${selected ? 'ring-1 ring-emerald-500/30 border-emerald-700/50' : ''}`
+          : hasResult && isMediaNode
+          ? `rounded-xl bg-zinc-900 border border-zinc-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.4)] hover:border-zinc-700/60 ${selected ? 'ring-1 ring-white/20 border-zinc-700/60' : ''}`
           : `rounded-xl bg-zinc-900 border border-zinc-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.4)] hover:border-zinc-700/60 ${selected ? 'ring-1 ring-white/20 border-zinc-700/60' : ''}`
         }`}
     >
       {/* Resize handles — always available, Shift = proportional */}
       <NodeResizer
-        minWidth={defaults.minWidth}
-        minHeight={defaults.minHeight}
-        keepAspectRatio={isShiftHeld}
-        isVisible={selected ?? false}
+        minWidth={imageResizeMinWidth}
+        minHeight={imageResizeMinHeight}
+        keepAspectRatio={keepAspectOnResize}
+        isVisible={selected}
         lineClassName={resizerClasses.line}
         handleClassName={resizerClasses.handle}
       />
 
       {/* Floating toolbar above the node */}
-      <NodeToolbar position={Position.Top} offset={8} isVisible>
-        <div className={`nodrag flex items-center gap-1.5 px-2 py-1 rounded-lg backdrop-blur-sm shadow-lg ${
+      <NodeToolbar position={Position.Top} align="center" offset={8} isVisible>
+        <div className={`nodrag flex items-center gap-1.5 px-2 py-1 rounded-lg backdrop-blur-sm shadow-lg max-w-[92vw] overflow-x-auto scrollbar-none ${
           isNote
             ? 'bg-amber-100/90 border border-amber-300/50'
             : isWebsite
@@ -332,7 +604,7 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
         }`}>
           {isWebsite ? (
             <>
-              {data.previewUrl && (Object.keys(VIEWPORT_PRESETS) as ViewportPreset[]).map((preset) => {
+              {data.previewUrl && (Object.keys(VIEWPORT_PRESETS) as Array<ViewportPreset>).map((preset) => {
                 const { icon: PresetIcon } = VIEWPORT_PRESETS[preset]
                 const isActive = (data.viewportPreset || 'desktop') === preset
                 return (
@@ -400,7 +672,7 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
                         const decoder = new TextDecoder()
                         let buffer = ''
 
-                        while (true) {
+                        for (;;) {
                           const { done, value } = await reader.read()
                           if (done) break
                           buffer += decoder.decode(value, { stream: true })
@@ -518,38 +790,157 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
           ) : (
             <>
               <Icon size={11} className="text-zinc-400" strokeWidth={2} />
-              <span className="text-[10px] font-medium text-zinc-400 tracking-wide uppercase">{config.label}</span>
-              {isAIBlock && models && models.length > 0 && (
+              {!(hasResult && isMediaNode) && (
+                <span className="text-[10px] font-medium text-zinc-400 tracking-wide uppercase">
+                  {config.label}
+                </span>
+              )}
+              {isAIBlock && models && models.length > 0 && !hasResult && (
                 <>
                   <div className="w-px h-3.5 bg-zinc-700/50" />
-                  {hasResult ? (
-                    <span className="text-[10px] text-zinc-500 max-w-[120px] truncate">
-                      {models.find((m) => m.falId === data.model)?.name}
+                  <select
+                    className="text-[10px] text-zinc-400 bg-transparent outline-none cursor-pointer hover:text-zinc-300 transition-colors max-w-[120px] truncate [&>option]:bg-zinc-900 [&>option]:text-zinc-300"
+                    value={data.model}
+                    title="Model"
+                    onChange={(e) => {
+                      const match = models.find((m) => m.falId === e.target.value)
+                      updateData({
+                        model: e.target.value,
+                        outputType: match ? (match.outputType as PortType) : undefined,
+                      })
+                    }}
+                  >
+                    {models.map((m) => (
+                      <option key={m._id} value={m.falId}>{m.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+              {hasResult && isMediaNode && (
+                <>
+                  <div className="w-px h-3.5 bg-zinc-700/50" />
+                  <div className="h-6 px-2 rounded-md bg-zinc-700/70 border border-zinc-600/60 flex items-center">
+                    <span className="text-[10px] font-semibold tracking-wide uppercase text-zinc-200 whitespace-nowrap">
+                      {mediaToolsLabel}
                     </span>
-                  ) : (
-                    <select
-                      className="text-[10px] text-zinc-400 bg-transparent outline-none cursor-pointer hover:text-zinc-300 transition-colors max-w-[120px] truncate [&>option]:bg-zinc-900 [&>option]:text-zinc-300"
-                      value={data.model}
-                      title="Model"
-                      onChange={(e) => {
-                        const match = models.find((m) => m.falId === e.target.value)
-                        updateData({
-                          model: e.target.value,
-                          outputType: match ? (match.outputType as PortType) : undefined,
-                        })
-                      }}
-                    >
-                      {models.map((m) => (
-                        <option key={m._id} value={m.falId}>{m.name}</option>
-                      ))}
-                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                    onClick={() => updateData({ rotationDeg: (rotationDeg + 90) % 360 })}
+                    title="Rotate 90°"
+                    {...getHintHandlers('Rotate')}
+                  >
+                    <RotateCw size={11} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+                      data.flipX
+                        ? 'bg-zinc-700/80 text-zinc-100'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                    }`}
+                    onClick={() => updateData({ flipX: !data.flipX })}
+                    title="Flip horizontally"
+                    {...getHintHandlers('Flip H')}
+                  >
+                    <FlipHorizontal size={11} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+                      data.flipY
+                        ? 'bg-zinc-700/80 text-zinc-100'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                    }`}
+                    onClick={() => updateData({ flipY: !data.flipY })}
+                    title="Flip vertically"
+                    {...getHintHandlers('Flip V')}
+                  >
+                    <FlipVertical size={11} />
+                  </button>
+                  <button
+                    type="button"
+                    className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                    onClick={resetNodeSize}
+                    title="Reset node size"
+                    {...getHintHandlers('Reset Size')}
+                  >
+                    <RefreshCw size={11} />
+                  </button>
+                  {replaceAccept && replaceCategory && (
+                    <>
+                      <button
+                        type="button"
+                        className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                        disabled={replacing}
+                        onClick={() => replaceInputRef.current?.click()}
+                        title="Replace media"
+                        {...getHintHandlers('Replace')}
+                      >
+                        {replacing ? (
+                          <Loader2 size={11} className="animate-spin" />
+                        ) : (
+                          <Upload size={11} />
+                        )}
+                      </button>
+                      <input
+                        ref={replaceInputRef}
+                        type="file"
+                        accept={replaceAccept}
+                        className="hidden"
+                        onChange={onReplaceFileChange}
+                      />
+                    </>
                   )}
+                  {data.contentType === 'image' && (
+                    <>
+                      <button
+                        type="button"
+                        className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                        disabled={activeImageTool !== null}
+                        onClick={() => runImageTool('remove_background')}
+                        title="Remove background (fal.ai)"
+                        {...getHintHandlers('BG Remove')}
+                      >
+                        {activeImageTool === 'remove_background' ? (
+                          <Loader2 size={11} className="animate-spin" />
+                        ) : (
+                          <Eraser size={11} />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                        disabled={activeImageTool !== null}
+                        onClick={() => runImageTool('upscale')}
+                        title="Upscale 2x (fal.ai)"
+                        {...getHintHandlers('Upscale')}
+                      >
+                        {activeImageTool === 'upscale' ? (
+                          <Loader2 size={11} className="animate-spin" />
+                        ) : (
+                          <Sparkles size={11} />
+                        )}
+                      </button>
+                    </>
+                  )}
+                  <div className="w-px h-3.5 bg-zinc-700/50" />
+                  <span className="text-[11px] font-medium text-zinc-200 whitespace-nowrap min-w-[96px]">
+                    {mediaActionHint}
+                  </span>
                 </>
               )}
             </>
           )}
         </div>
       </NodeToolbar>
+
+      {toolbarError && (
+        <div className="absolute top-9 left-2 right-2 z-20 rounded-md bg-red-500/10 border border-red-500/30 px-2 py-1 text-[10px] text-red-300 nodrag">
+          {toolbarError}
+        </div>
+      )}
 
       {/* Input handles — AI blocks only, hidden after result */}
       {isAIBlock && !hasResult &&
@@ -631,19 +1022,31 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
 
           {/* Completed — media fills available space */}
           {hasResult && (
-            <div className="relative group/result flex-1 min-h-0">
+            <div className="relative group/result flex-1 min-h-0 cursor-move">
+              {/* Keep image/video previews non-interactive so drag/resize stays consistent. */}
               {data.contentType === 'image' && (
-                <img
-                  src={data.resultUrl}
-                  alt={data.label}
-                  className="w-full h-full object-contain block rounded-b-xl"
-                />
+                <div className="w-full h-full overflow-hidden rounded-[inherit]">
+                  <img
+                    src={data.resultUrl}
+                    alt={data.label}
+                    className="w-full h-full block pointer-events-none select-none"
+                    style={imageStyle}
+                    onLoad={onImageLoaded}
+                    draggable={false}
+                  />
+                </div>
               )}
               {data.contentType === 'video' && (
                 <video
                   src={data.resultUrl}
-                  controls
-                  className="nodrag w-full h-full object-contain block"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="metadata"
+                  className="w-full h-full block rounded-b-xl pointer-events-none select-none"
+                  style={videoStyle}
+                  draggable={false}
                 />
               )}
               {(data.contentType === 'audio' ||
@@ -763,6 +1166,13 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
             </div>
           ) : data.previewUrl ? (
             <div className="flex-1 min-h-0 relative">
+              <div
+                className="absolute top-2 left-2 z-10 h-6 px-2 rounded-md bg-zinc-900/80 border border-zinc-700/70 text-zinc-300 text-[10px] font-medium flex items-center gap-1.5 cursor-grab active:cursor-grabbing select-none"
+                title="Drag node"
+              >
+                <GripHorizontal size={10} className="text-zinc-400" />
+                <span>Drag</span>
+              </div>
               <iframe
                 src={data.previewUrl}
                 className="nodrag nowheel w-full h-full bg-white rounded-b-xl"
@@ -771,7 +1181,7 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
               />
               {/* Deploy logs overlay */}
               {deployLogs && (
-                <div className="absolute inset-0 bg-zinc-950/95 rounded-b-xl flex flex-col">
+                <div className="absolute inset-0 z-20 bg-zinc-950/95 rounded-b-xl flex flex-col">
                   <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
                     <span className="text-[11px] font-medium text-zinc-400">
                       {data.deploymentStatus === 'deploying' ? 'Deploying...' : 'Deploy Logs'}
