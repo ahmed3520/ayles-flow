@@ -120,21 +120,36 @@ async def restore_sandbox(req: RestoreRequest):
                 yield json.dumps({"type": "error", "message": f"Unknown template: {template_name}"}) + "\n"
                 return
 
-            # 2. Create fresh sandbox
+            # 2. Try reconnecting to existing sandbox first
+            sandbox = None
+            info = None
+            if req.sandbox_id:
+                try:
+                    yield json.dumps({"type": "status", "step": "Reconnecting to sandbox..."}) + "\n"
+                    sandbox, info = reconnect_sandbox(req.sandbox_id)
+                    preview_url = get_preview_url(sandbox, template.default_port)
+                    log.info(f"Reconnected to existing sandbox {req.sandbox_id} for {req.project_id}")
+                    yield json.dumps({"type": "done", "sandboxId": info.sandbox_id, "previewUrl": preview_url}) + "\n"
+                    return
+                except Exception as e:
+                    log.info(f"Reconnect failed for {req.sandbox_id}: {e}, creating fresh sandbox")
+                    sandbox = None
+
+            # 3. Create fresh sandbox (reconnect failed or no sandbox_id)
             yield json.dumps({"type": "status", "step": "Creating sandbox..."}) + "\n"
             sandbox, info = create_sandbox(template_name)
 
-            # 3. Restore files from R2
+            # 4. Restore files from R2
             yield json.dumps({"type": "status", "step": "Restoring files..."}) + "\n"
             _restore_files(sandbox, req.project_id, template.workdir)
 
-            # 4. Install dependencies
+            # 5. Install dependencies
             yield json.dumps({"type": "status", "step": "Installing dependencies..."}) + "\n"
             result = sandbox.commands.run(f"cd {template.workdir} && npm install 2>&1", timeout=120)
             if result.exit_code != 0:
                 yield json.dumps({"type": "status", "step": f"npm install failed (exit {result.exit_code}), continuing..."}) + "\n"
 
-            # 5. Start dev server in background
+            # 6. Start dev server in background
             if template.dev_cmd:
                 yield json.dumps({"type": "status", "step": "Starting dev server..."}) + "\n"
                 sandbox.commands.run(
