@@ -88,6 +88,8 @@ You own frontend AND backend:
 3. `npx convex dev --once` to push schema
 4. Frontend with `useQuery`/`useMutation`
 
+**Auth is already provisioned.** `.env.local` has `CONVEX_DEPLOYMENT` and `CONVEX_DEPLOY_KEY`. Do NOT run `npx convex login` or try to set up auth — just run `npx convex dev --once` directly and it works.
+
 ### REST/Express (vite-express, nextjs-express)
 Check **Implementation Status > Backend** in `project.md` for endpoints, auth, ports. No backend? Build frontend-only with mock data.
 

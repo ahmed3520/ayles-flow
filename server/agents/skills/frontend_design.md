@@ -16,7 +16,7 @@ Use shell commands to initialize projects (`npx create-next-app`, `npx create-vi
 
 If the user specifies a style or aesthetic, follow their direction. If they do NOT, pick ONE of these modes at random — vary your choice across projects:
 
-- **Clean Minimal** — Apple-like restraint, whitespace-driven, quiet confidence
+- **Clean Minimal** — cheque elegant,Apple-like restraint, whitespace-driven, quiet confidence (this is the default if no style is specified most of times)
 - **Editorial** — Magazine/print-inspired, type-forward, sophisticated
 - **Warm Organic** — Earthy, natural, calm and inviting
 - **Geometric Modern** — Swiss-inspired, precise, bold structure

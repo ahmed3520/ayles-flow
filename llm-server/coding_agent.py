@@ -121,6 +121,19 @@ PERSONA_CORE_SKILL: dict[str, str] = {
     "backend": "backend-dev",
 }
 
+# Maps template → essentials skill to auto-embed in system prompt (cached)
+# instead of loading at runtime (which pollutes context on every round)
+TEMPLATE_ESSENTIALS_SKILL: dict[str, list[str]] = {
+    "nextjs": ["nextjs-essentials"],
+    "nextjs-express": ["nextjs-essentials"],
+    "nextjs-convex": ["nextjs-convex-essentials"],
+    "vite": ["vite-react-fundamentals"],
+    "vite-express": ["vite-react-fundamentals"],
+    "vite-convex": ["vite-react-fundamentals", "convex"],
+    "tanstack": ["vite-react-fundamentals"],
+    "tanstack-convex": ["vite-react-fundamentals", "convex"],
+}
+
 
 
 
@@ -388,6 +401,8 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
             finish_reason = ""
             reasoning_content = ""
             reasoning_details = None
+            _partial_args: dict[int, str] = {}
+            _path_sent: set[int] = set()
 
             # Stream LLM call directly via llm_client (no HTTP self-call)
             async for event in llm_client.stream_chat(
@@ -411,7 +426,24 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                     yield {"type": "ping"}
 
                 elif etype == "tool_start":
-                    yield {"type": "tool_start", "tool": event.get("name", "")}
+                    tool_name = event.get("name", "")
+                    if tool_name not in ("load_skill",):
+                        yield {"type": "tool_start", "tool": tool_name, "index": event.get("index")}
+
+                elif etype == "tool_delta":
+                    # Try to extract file path from streamed args early
+                    idx = event.get("index")
+                    args_chunk = event.get("args", "")
+                    if idx is not None:
+                        _partial_args[idx] = _partial_args.get(idx, "") + args_chunk
+                        partial = _partial_args[idx]
+                        # Once we have "path":"...", extract and send to frontend
+                        if idx not in _path_sent:
+                            m = re.search(r'"path"\s*:\s*"([^"]+)"', partial)
+                            if m:
+                                _path_sent.add(idx)
+                                file_path = re.sub(r"^/home/user/app/", "", m.group(1))
+                                yield {"type": "tool_path", "index": idx, "path": file_path}
 
                 elif etype == "tool_complete":
                     completed_calls = event.get("toolCalls", [])
@@ -467,25 +499,22 @@ async def coding_agent_loop(req: CodingChatRequest) -> AsyncGenerator[dict, None
                 assistant_msg["reasoning_details"] = reasoning_details
             messages.append(assistant_msg)
 
-            # Execute tool calls in parallel via thread pool
-            parsed_calls = [(tc, _safe_parse_json(tc["args"])) for tc in completed_calls]
+            # Execute tool calls sequentially (E2B sync SDK httpx.Client is not thread-safe)
+            HIDDEN_TOOLS = {"load_skill"}
+            HIDDEN_EVENTS = {"skill_loaded"}
 
-            if len(parsed_calls) == 1:
-                tc, args = parsed_calls[0]
-                results = [(tc, args, execute_coding_tool(sandbox, tc["name"], args, tool_ctx))]
-            else:
-                parallel_results = await asyncio.gather(*[
-                    asyncio.to_thread(execute_coding_tool, sandbox, tc["name"], args, tool_ctx)
-                    for tc, args in parsed_calls
-                ])
-                results = [(tc, args, r) for (tc, args), r in zip(parsed_calls, parallel_results)]
+            for tc in completed_calls:
+                args = _safe_parse_json(tc["args"])
+                result = execute_coding_tool(sandbox, tc["name"], args, tool_ctx)
 
-            for tc, args, result in results:
-                yield {"type": "tool_call", "tool": tc["name"], "args": _strip_large_args(args)}
+                if tc["name"] not in HIDDEN_TOOLS:
+                    yield {"type": "tool_call", "tool": tc["name"], "args": _strip_large_args(args)}
 
                 # Drain any events from tool execution
                 while not event_queue.empty():
-                    yield event_queue.get_nowait()
+                    evt = event_queue.get_nowait()
+                    if evt.get("type") not in HIDDEN_EVENTS:
+                        yield evt
 
                 if result.expired:
                     yield {"type": "error", "message": "Sandbox expired."}

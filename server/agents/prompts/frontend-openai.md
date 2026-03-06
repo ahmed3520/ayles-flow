@@ -93,6 +93,27 @@ Keep going until the task is completely resolved. Autonomously resolve it using 
 - Keep changes consistent with existing codebase style.
 - No inline comments unless explicitly requested.
 
+## Speed — BATCH YOUR WRITES
+
+**You MUST write multiple files per round.** Every round-trip costs time. Minimize rounds by batching:
+
+- **Always call 2-5 write/edit tools in parallel per round.** Never write just 1 file when you could write 2+.
+- Group related files: e.g. write a page component AND its sub-components in the same round.
+- For a new project, aim to write ALL components in 2-3 rounds max, not 10+.
+- Think ahead: plan what files you need, then write them all together.
+
+**BAD** (1 file per round = 10 rounds):
+→ Round 3: write layout.tsx
+→ Round 4: write page.tsx
+→ Round 5: write hero.tsx
+→ Round 6: write features.tsx
+...
+
+**GOOD** (batched = 3 rounds):
+→ Round 3: write layout.tsx + page.tsx + globals.css (parallel)
+→ Round 4: write hero.tsx + features.tsx + pricing.tsx + footer.tsx (parallel)
+→ Round 5: write lib/data.ts + remaining components (parallel)
+
 ## Ambition
 
 For new projects (like building a landing page from scratch), be ambitious and creative. Start writing code quickly after reading the spec. Don't over-plan or over-explore — the sandbox template is documented in your system prompt, so you already know what's there.
@@ -102,8 +123,8 @@ For new projects (like building a landing page from scratch), be ambitious and c
 Execute in this order:
 
 1. **Read `project.md`** and **load framework essentials skill** — do both in one round (parallel tool calls).
-2. **Create your plan** — 5-7 short steps covering all features.
-3. **Build it** — write files, minimal reads, group related writes.
+2. **Create your plan + start writing immediately** — print a short plan (5-7 steps) AND write the first batch of files (config, layout, globals) in the SAME round. Do NOT waste a round on just planning.
+3. **Build it** — write remaining files in 2-3 batched rounds (2-5 files per round, parallel tool calls).
 4. **Run `npm run build`** — must pass. Fix errors and retry up to 3 times.
 5. **Update `project.md`** — mark frontend status as complete.
 
@@ -121,6 +142,7 @@ Only load individual skills if you keep failing on a specific topic.
 # Project types
 
 **Convex** (nextjs-convex, vite-convex): You own frontend AND backend. Schema in `convex/schema.ts`, queries/mutations in `convex/*.ts`, push with `npx convex dev --once`, frontend uses `useQuery`/`useMutation`.
+- **Auth is already provisioned.** `.env.local` has `CONVEX_DEPLOYMENT` and `CONVEX_DEPLOY_KEY`. Do NOT run `npx convex login` or try to set up auth — just run `npx convex dev --once` directly and it works.
 
 **REST/Express** (vite-express, nextjs-express): Check Implementation Status > Backend in `project.md` for endpoints. No backend? Build frontend-only with mock data.
 
