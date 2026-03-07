@@ -848,6 +848,11 @@ async def agent_chat_ws(websocket: WebSocket):
     New stream:    client sends {messages, canvasState, models, agentModel, projectId}
     Resume stream: client sends {resume: streamId, lastIndex: N}
     """
+    from main import check_websocket_origin
+    if not check_websocket_origin(websocket):
+        await websocket.close(code=4403, reason="Origin not allowed")
+        return
+
     await websocket.accept()
     stream_id = None
     connection_id = uuid.uuid4().hex

@@ -12,6 +12,7 @@ import {
 import {
   AlertCircle,
   ArrowUp,
+  Copy,
   Download,
   Eraser,
   ExternalLink,
@@ -22,22 +23,26 @@ import {
   GripHorizontal,
   Image,
   Loader2,
+  Lock,
   Mic,
   Monitor,
   Music,
   RefreshCw,
   Rocket,
   RotateCw,
+  Send,
   Smartphone,
   Sparkles,
   StickyNote,
   Tablet,
   Ticket,
   Type,
+  Unlock,
   Upload,
   Video,
 } from 'lucide-react'
-import { useQuery } from 'convex/react'
+import { useMutation, useQuery } from 'convex/react'
+import TiptapEditor from './TiptapEditor'
 
 import { api } from '../../../../convex/_generated/api'
 
@@ -48,10 +53,24 @@ import type { BlockNodeData, NodeContentType, PortType } from '@/types/nodes'
 import type { UploadContentCategory } from '@/types/uploads'
 import { useGenerationStatus } from '@/hooks/useGenerationStatus'
 import { useFileUpload } from '@/hooks/useFileUpload'
+import { submitImageTool } from '@/data/fal'
 import { AI_CONTENT_TYPES, NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
 import { downloadNodeResult } from '@/utils/downloadUtils'
 
 type BlockNodeType = Node<BlockNodeData, 'blockNode'>
+
+function ToolbarHint({ label, show, children }: { label: string; show: boolean; children: React.ReactNode }) {
+  return (
+    <span className="relative">
+      {show && (
+        <span className="absolute -top-6 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-[9px] text-zinc-300 whitespace-nowrap pointer-events-none z-10">
+          {label}
+        </span>
+      )}
+      {children}
+    </span>
+  )
+}
 
 const VIEWPORT_PRESETS = {
   desktop: { width: 640, icon: Monitor },
@@ -110,19 +129,55 @@ const UPLOAD_CATEGORY_BY_TYPE: Partial<
   pdf: 'pdf',
 }
 
+const TICKET_STATUSES = ['todo', 'doing', 'done'] as const
+const TICKET_STATUS_CONFIG = {
+  todo: { label: 'To Do', bg: 'bg-violet-500/15', text: 'text-violet-400' },
+  doing: { label: 'Doing', bg: 'bg-amber-500/15', text: 'text-amber-400' },
+  done: { label: 'Done', bg: 'bg-emerald-500/15', text: 'text-emerald-400' },
+} as const
+
+const TICKET_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
+const TICKET_PRIORITY_CONFIG = {
+  low: { label: 'Low', bg: 'bg-zinc-700', text: 'text-zinc-400' },
+  normal: { label: 'Normal', bg: 'bg-zinc-700', text: 'text-zinc-400' },
+  high: { label: 'High', bg: 'bg-orange-500/15', text: 'text-orange-400' },
+  urgent: { label: 'Urgent', bg: 'bg-red-500/15', text: 'text-red-400' },
+} as const
+
+const TICKET_TAGS = [
+  { value: '', label: 'No tag', color: 'bg-zinc-600' },
+  { value: 'feature', label: 'Feature', color: 'bg-blue-500' },
+  { value: 'bug', label: 'Bug', color: 'bg-red-500' },
+  { value: 'design', label: 'Design', color: 'bg-pink-500' },
+  { value: 'refactor', label: 'Refactor', color: 'bg-amber-500' },
+  { value: 'docs', label: 'Docs', color: 'bg-emerald-500' },
+] as const
+
+const NOTE_COLORS = ['yellow', 'green', 'blue', 'pink', 'purple'] as const
+const NOTE_COLOR_CONFIG = {
+  yellow: { bg: '#fef3c7', text: '#78350f', lines: 'rgba(180,140,50,0.08)', fold: 'rgba(180,140,50,0.12)', dot: '#fbbf24', accent: '#d97706', ring: '#fbbf24', toolbar: '#fef3c7', toolbarBorder: '#fde68a' },
+  green:  { bg: '#d1fae5', text: '#064e3b', lines: 'rgba(50,140,80,0.08)', fold: 'rgba(50,140,80,0.12)', dot: '#34d399', accent: '#059669', ring: '#34d399', toolbar: '#d1fae5', toolbarBorder: '#6ee7b7' },
+  blue:   { bg: '#e0f2fe', text: '#0c4a6e', lines: 'rgba(50,100,180,0.08)', fold: 'rgba(50,100,180,0.12)', dot: '#38bdf8', accent: '#0284c7', ring: '#38bdf8', toolbar: '#e0f2fe', toolbarBorder: '#7dd3fc' },
+  pink:   { bg: '#fce7f3', text: '#831843', lines: 'rgba(180,50,100,0.08)', fold: 'rgba(180,50,100,0.12)', dot: '#f472b6', accent: '#db2777', ring: '#f472b6', toolbar: '#fce7f3', toolbarBorder: '#f9a8d4' },
+  purple: { bg: '#ede9fe', text: '#3b0764', lines: 'rgba(120,50,180,0.08)', fold: 'rgba(120,50,180,0.12)', dot: '#a78bfa', accent: '#7c3aed', ring: '#a78bfa', toolbar: '#ede9fe', toolbarBorder: '#c4b5fd' },
+} as const
+
 type ImageToolActionState = 'remove_background' | 'upscale' | null
 
 function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
   const { setNodes } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
-  const { onGenerate } = useCanvasActions()
+  const { onGenerate, onAgentSend } = useCanvasActions()
   const { uploadFile } = useFileUpload()
   const edges = useEdges()
+  const createGeneration = useMutation(api.generations.create)
+  const setFalRequestId = useMutation(api.generations.setFalRequestId)
   const replaceInputRef = useRef<HTMLInputElement>(null)
   const config = contentTypeConfig[data.contentType]
   const Icon = config.icon
   const isAIBlock = AI_CONTENT_TYPES.includes(data.contentType)
   const isNote = data.contentType === 'note'
+  const noteTheme = NOTE_COLOR_CONFIG[data.noteColor || 'yellow']
   const isTicket = data.contentType === 'ticket'
   const isWebsite = data.contentType === 'website'
 
@@ -209,6 +264,24 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
       .map((input) => input.type as PortType)
       .sort()
   }, [allModelsForType, data.model])
+
+  // Query image tool models (upscale + bg removal) for image blocks
+  const upscaleModels = useQuery(
+    api.models.listByContentType,
+    data.contentType === 'image' ? { contentType: 'upscale' } : 'skip',
+  )
+  const bgRemoveModels = useQuery(
+    api.models.listByContentType,
+    data.contentType === 'image' ? { contentType: 'remove_background' } : 'skip',
+  )
+  const [selectedUpscaleModel, setSelectedUpscaleModel] = useState<string>('')
+
+  // Set default upscale model
+  useEffect(() => {
+    if (upscaleModels && upscaleModels.length > 0 && !selectedUpscaleModel) {
+      setSelectedUpscaleModel(upscaleModels[0].falId)
+    }
+  }, [upscaleModels, selectedUpscaleModel])
 
   // Map content type to port type — note/ticket output text
   const CONTENT_TO_PORT: Record<string, PortType> = {
@@ -330,7 +403,6 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
   const rotationDeg = data.rotationDeg || 0
   const flipX = data.flipX ? -1 : 1
   const flipY = data.flipY ? -1 : 1
-  const mediaToolsLabel = data.contentType === 'image' ? 'Image Tools' : 'Video Tools'
   const mediaTransformStyle = {
     transform: `rotate(${rotationDeg}deg) scale(${flipX}, ${flipY})`,
     transformOrigin: 'center',
@@ -353,14 +425,15 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
     useState<ImageToolActionState>(null)
   const [replacing, setReplacing] = useState(false)
   const [toolbarError, setToolbarError] = useState<string | null>(null)
-  const [mediaActionHint, setMediaActionHint] = useState('Choose action')
+  const [hovered, setHovered] = useState(false)
+  const [hoveredHint, setHoveredHint] = useState<string | null>(null)
 
   const getHintHandlers = useCallback(
     (label: string) => ({
-      onMouseEnter: () => setMediaActionHint(label),
-      onFocus: () => setMediaActionHint(label),
-      onMouseLeave: () => setMediaActionHint('Choose action'),
-      onBlur: () => setMediaActionHint('Choose action'),
+      onMouseEnter: () => setHoveredHint(label),
+      onFocus: () => setHoveredHint(label),
+      onMouseLeave: () => setHoveredHint(null),
+      onBlur: () => setHoveredHint(null),
     }),
     [],
   )
@@ -460,32 +533,44 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
   ])
 
   const runImageTool = useCallback(
-    async (action: Exclude<ImageToolActionState, null>) => {
-      if (!data.resultUrl) return
+    async (action: Exclude<ImageToolActionState, null>, modelId: string) => {
+      if (!data.resultUrl || !modelId) return
 
       setToolbarError(null)
       setActiveImageTool(action)
+      updateData({
+        generationStatus: 'generating',
+        errorMessage: undefined,
+      })
+
       try {
-        const { runFalImageTool } = await import('@/data/fal')
-        const result = await runFalImageTool({
-          data: { action, imageUrl: data.resultUrl, upscaleFactor: 2 },
+        const generationId = await createGeneration({
+          contentType: action,
+          modelId,
+          prompt: action,
         })
-        updateData({
-          resultUrl: result.imageUrl,
-          imageWidth: result.width,
-          imageHeight: result.height,
-          generationStatus: 'completed',
-          errorMessage: undefined,
+
+        updateData({ generationId: generationId as unknown as string })
+
+        const { requestId } = await submitImageTool({
+          data: { action, modelId, imageUrl: data.resultUrl, upscaleFactor: 2 },
+        })
+
+        await setFalRequestId({
+          id: generationId,
+          falRequestId: requestId,
         })
       } catch (error) {
-        setToolbarError(
-          error instanceof Error ? error.message : 'Image action failed',
-        )
+        updateData({
+          generationStatus: 'error',
+          errorMessage:
+            error instanceof Error ? error.message : 'Image action failed',
+        })
       } finally {
         setActiveImageTool(null)
       }
     },
-    [data.resultUrl, updateData],
+    [data.resultUrl, updateData, createGeneration, setFalRequestId],
   )
 
   const onReplaceFileChange = useCallback(
@@ -569,9 +654,11 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
 
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       className={`group relative w-full h-full flex flex-col transition-all duration-200
         ${isNote
-          ? `rounded-[2px] bg-amber-100 shadow-[2px_3px_15px_rgba(0,0,0,0.1),0_1px_4px_rgba(0,0,0,0.06)] hover:shadow-[2px_4px_20px_rgba(0,0,0,0.14)] ${selected ? 'ring-2 ring-amber-400/50' : ''}`
+          ? `rounded-[2px] shadow-[2px_3px_15px_rgba(0,0,0,0.1),0_1px_4px_rgba(0,0,0,0.06)] hover:shadow-[2px_4px_20px_rgba(0,0,0,0.14)] ${selected ? 'ring-2' : ''}`
           : isTicket
           ? `rounded-xl bg-zinc-900 border border-zinc-800/60 border-l-[3px] border-l-violet-500 shadow-[0_1px_3px_rgba(0,0,0,0.4)] hover:border-zinc-700/60 hover:border-l-violet-400 ${selected ? 'ring-1 ring-violet-500/30 border-zinc-700/60' : ''}`
           : isWebsite
@@ -580,6 +667,7 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
           ? `rounded-xl bg-zinc-900 border border-zinc-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.4)] hover:border-zinc-700/60 ${selected ? 'ring-1 ring-white/20 border-zinc-700/60' : ''}`
           : `rounded-xl bg-zinc-900 border border-zinc-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.4)] hover:border-zinc-700/60 ${selected ? 'ring-1 ring-white/20 border-zinc-700/60' : ''}`
         }`}
+      style={isNote ? { backgroundColor: noteTheme.bg, '--tw-ring-color': noteTheme.ring } as React.CSSProperties : undefined}
     >
       {/* Resize handles — always available, Shift = proportional */}
       <NodeResizer
@@ -592,16 +680,19 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
       />
 
       {/* Floating toolbar above the node */}
-      <NodeToolbar position={Position.Top} align="center" offset={8} isVisible>
-        <div className={`nodrag flex items-center gap-1.5 px-2 py-1 rounded-lg backdrop-blur-sm shadow-lg max-w-[92vw] overflow-x-auto scrollbar-none ${
-          isNote
-            ? 'bg-amber-100/90 border border-amber-300/50'
-            : isWebsite
-            ? 'bg-zinc-800/90 border border-emerald-800/40'
-            : isTicket
-            ? 'bg-zinc-800/90 border border-violet-800/40'
-            : 'bg-zinc-800/90 border border-zinc-700/50'
-        }`}>
+      <NodeToolbar position={Position.Top} align="center" offset={8} isVisible={selected || hovered}>
+        <div
+          className={`nodrag flex items-center gap-1.5 px-2 py-1 rounded-lg backdrop-blur-sm shadow-lg max-w-[92vw] overflow-visible border ${
+            isNote
+              ? ''
+              : isWebsite
+              ? 'bg-zinc-800/90 border-emerald-800/40'
+              : isTicket
+              ? 'bg-zinc-800/90 border-violet-800/40'
+              : 'bg-zinc-800/90 border-zinc-700/50'
+          }`}
+          style={isNote ? { backgroundColor: noteTheme.toolbar, borderColor: noteTheme.toolbarBorder } : undefined}
+        >
           {isWebsite ? (
             <>
               {data.previewUrl && (Object.keys(VIEWPORT_PRESETS) as Array<ViewportPreset>).map((preset) => {
@@ -778,14 +869,107 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
             </>
           ) : isNote ? (
             <>
-              <StickyNote size={11} className="text-amber-600" />
-              <span className="text-[10px] font-medium text-amber-700">Note</span>
+              <StickyNote size={11} style={{ color: noteTheme.accent }} />
+              {/* Color presets */}
+              <div className="flex items-center gap-1.5">
+                {NOTE_COLORS.map((c) => {
+                  const isActive = (data.noteColor || 'yellow') === c
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      className={`w-3.5 h-3.5 rounded-full transition-opacity ${isActive ? '' : 'opacity-50 hover:opacity-80'}`}
+                      style={{ backgroundColor: NOTE_COLOR_CONFIG[c].dot, boxShadow: isActive ? `0 0 0 2px ${NOTE_COLOR_CONFIG[c].toolbar}, 0 0 0 3.5px ${NOTE_COLOR_CONFIG[c].dot}` : undefined }}
+                      onClick={() => updateData({ noteColor: c })}
+                      title={c}
+                    />
+                  )
+                })}
+              </div>
+              <div className="w-px h-3.5 bg-black/10" />
+              {/* Duplicate */}
+              <ToolbarHint label="Duplicate" show={hoveredHint === 'note-duplicate'}>
+                <button
+                  type="button"
+                  title="Duplicate"
+                  className="w-6 h-6 rounded-md flex items-center justify-center hover:opacity-70 transition-opacity"
+                  style={{ color: noteTheme.accent }}
+                  onMouseEnter={() => setHoveredHint('note-duplicate')}
+                  onMouseLeave={() => setHoveredHint(null)}
+                  onClick={() => {
+                    setNodes((nds) => {
+                      const thisNode = nds.find((n) => n.id === id)
+                      if (!thisNode) return nds
+                      return [...nds, {
+                        ...thisNode,
+                        id: `node-${Date.now()}`,
+                        position: { x: thisNode.position.x + 30, y: thisNode.position.y + 30 },
+                        selected: false,
+                        data: { ...thisNode.data },
+                      }]
+                    })
+                  }}
+                >
+                  <Copy size={13} />
+                </button>
+              </ToolbarHint>
+              {/* Send to agent */}
+              <ToolbarHint label="Send to agent" show={hoveredHint === 'note-extract'}>
+                <button
+                  type="button"
+                  title="Send to agent"
+                  className="w-6 h-6 rounded-md flex items-center justify-center hover:opacity-70 transition-opacity"
+                  style={{ color: noteTheme.accent }}
+                  onMouseEnter={() => setHoveredHint('note-extract')}
+                  onMouseLeave={() => setHoveredHint(null)}
+                  onClick={() => {
+                    const text = data.prompt.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+                    if (!text) return
+                    onAgentSend(text)
+                  }}
+                >
+                  <Send size={13} />
+                </button>
+              </ToolbarHint>
+              <div className="w-px h-3.5 bg-black/10" />
+              {/* Lock/Unlock */}
+              <ToolbarHint label={data.noteLocked ? 'Unlock' : 'Lock'} show={hoveredHint === 'note-lock'}>
+                <button
+                  type="button"
+                  title={data.noteLocked ? 'Unlock' : 'Lock'}
+                  className="w-6 h-6 rounded-md flex items-center justify-center hover:opacity-70 transition-opacity"
+                  style={{ color: noteTheme.accent }}
+                  onMouseEnter={() => setHoveredHint('note-lock')}
+                  onMouseLeave={() => setHoveredHint(null)}
+                  onClick={() => updateData({ noteLocked: !data.noteLocked })}
+                >
+                  {data.noteLocked ? <Lock size={13} /> : <Unlock size={13} />}
+                </button>
+              </ToolbarHint>
             </>
           ) : isTicket ? (
             <>
               <div className="w-1.5 h-1.5 rounded-full bg-violet-500" />
               <span className="text-[10px] font-mono font-medium text-violet-400/90 tracking-wider uppercase">Ticket</span>
               <span className="text-[9px] font-mono text-zinc-500">#{id.slice(-4).toUpperCase()}</span>
+              <div className="w-px h-3.5 bg-zinc-700/50" />
+              <ToolbarHint label="Send to agent" show={hoveredHint === 'ticket-send'}>
+                <button
+                  type="button"
+                  className="w-6 h-6 rounded-md flex items-center justify-center text-violet-400/70 hover:text-violet-300 hover:bg-violet-500/10 transition-colors"
+                  title="Send to agent"
+                  onMouseEnter={() => setHoveredHint('ticket-send')}
+                  onMouseLeave={() => setHoveredHint(null)}
+                  onClick={() => {
+                    const text = data.prompt.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+                    if (!text) return
+                    const tag = data.ticketTag ? `[${data.ticketTag}] ` : ''
+                    onAgentSend(`${tag}Ticket #${id.slice(-4).toUpperCase()}: ${text}`)
+                  }}
+                >
+                  <Send size={13} />
+                </button>
+              </ToolbarHint>
             </>
           ) : (
             <>
@@ -819,71 +1003,71 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
               {hasResult && isMediaNode && (
                 <>
                   <div className="w-px h-3.5 bg-zinc-700/50" />
-                  <div className="h-6 px-2 rounded-md bg-zinc-700/70 border border-zinc-600/60 flex items-center">
-                    <span className="text-[10px] font-semibold tracking-wide uppercase text-zinc-200 whitespace-nowrap">
-                      {mediaToolsLabel}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-                    onClick={() => updateData({ rotationDeg: (rotationDeg + 90) % 360 })}
-                    title="Rotate 90°"
-                    {...getHintHandlers('Rotate')}
-                  >
-                    <RotateCw size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
-                      data.flipX
-                        ? 'bg-zinc-700/80 text-zinc-100'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                    }`}
-                    onClick={() => updateData({ flipX: !data.flipX })}
-                    title="Flip horizontally"
-                    {...getHintHandlers('Flip H')}
-                  >
-                    <FlipHorizontal size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
-                      data.flipY
-                        ? 'bg-zinc-700/80 text-zinc-100'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                    }`}
-                    onClick={() => updateData({ flipY: !data.flipY })}
-                    title="Flip vertically"
-                    {...getHintHandlers('Flip V')}
-                  >
-                    <FlipVertical size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-                    onClick={resetNodeSize}
-                    title="Reset node size"
-                    {...getHintHandlers('Reset Size')}
-                  >
-                    <RefreshCw size={11} />
-                  </button>
+                  <ToolbarHint label="Rotate" show={hoveredHint === 'Rotate'}>
+                    <button
+                      type="button"
+                      className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                      onClick={() => updateData({ rotationDeg: (rotationDeg + 90) % 360 })}
+                      {...getHintHandlers('Rotate')}
+                    >
+                      <RotateCw size={11} />
+                    </button>
+                  </ToolbarHint>
+                  <ToolbarHint label="Flip H" show={hoveredHint === 'Flip H'}>
+                    <button
+                      type="button"
+                      className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+                        data.flipX
+                          ? 'bg-zinc-700/80 text-zinc-100'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                      }`}
+                      onClick={() => updateData({ flipX: !data.flipX })}
+                      {...getHintHandlers('Flip H')}
+                    >
+                      <FlipHorizontal size={11} />
+                    </button>
+                  </ToolbarHint>
+                  <ToolbarHint label="Flip V" show={hoveredHint === 'Flip V'}>
+                    <button
+                      type="button"
+                      className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+                        data.flipY
+                          ? 'bg-zinc-700/80 text-zinc-100'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                      }`}
+                      onClick={() => updateData({ flipY: !data.flipY })}
+                      {...getHintHandlers('Flip V')}
+                    >
+                      <FlipVertical size={11} />
+                    </button>
+                  </ToolbarHint>
+                  <ToolbarHint label="Reset Size" show={hoveredHint === 'Reset Size'}>
+                    <button
+                      type="button"
+                      className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+                      onClick={resetNodeSize}
+                      {...getHintHandlers('Reset Size')}
+                    >
+                      <RefreshCw size={11} />
+                    </button>
+                  </ToolbarHint>
                   {replaceAccept && replaceCategory && (
                     <>
-                      <button
-                        type="button"
-                        className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
-                        disabled={replacing}
-                        onClick={() => replaceInputRef.current?.click()}
-                        title="Replace media"
-                        {...getHintHandlers('Replace')}
-                      >
-                        {replacing ? (
-                          <Loader2 size={11} className="animate-spin" />
-                        ) : (
-                          <Upload size={11} />
-                        )}
-                      </button>
+                      <ToolbarHint label="Replace" show={hoveredHint === 'Replace'}>
+                        <button
+                          type="button"
+                          className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                          disabled={replacing}
+                          onClick={() => replaceInputRef.current?.click()}
+                          {...getHintHandlers('Replace')}
+                        >
+                          {replacing ? (
+                            <Loader2 size={11} className="animate-spin" />
+                          ) : (
+                            <Upload size={11} />
+                          )}
+                        </button>
+                      </ToolbarHint>
                       <input
                         ref={replaceInputRef}
                         type="file"
@@ -895,40 +1079,59 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
                   )}
                   {data.contentType === 'image' && (
                     <>
-                      <button
-                        type="button"
-                        className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
-                        disabled={activeImageTool !== null}
-                        onClick={() => runImageTool('remove_background')}
-                        title="Remove background (fal.ai)"
-                        {...getHintHandlers('BG Remove')}
-                      >
-                        {activeImageTool === 'remove_background' ? (
-                          <Loader2 size={11} className="animate-spin" />
-                        ) : (
-                          <Eraser size={11} />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
-                        disabled={activeImageTool !== null}
-                        onClick={() => runImageTool('upscale')}
-                        title="Upscale 2x (fal.ai)"
-                        {...getHintHandlers('Upscale')}
-                      >
-                        {activeImageTool === 'upscale' ? (
-                          <Loader2 size={11} className="animate-spin" />
-                        ) : (
-                          <Sparkles size={11} />
-                        )}
-                      </button>
+                      {bgRemoveModels && bgRemoveModels.length > 0 && (
+                        <ToolbarHint label="BG Remove" show={hoveredHint === 'BG Remove'}>
+                          <button
+                            type="button"
+                            className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                            disabled={activeImageTool !== null}
+                            onClick={() => runImageTool('remove_background', bgRemoveModels[0].falId)}
+                            {...getHintHandlers('BG Remove')}
+                          >
+                            {activeImageTool === 'remove_background' ? (
+                              <Loader2 size={11} className="animate-spin" />
+                            ) : (
+                              <Eraser size={11} />
+                            )}
+                          </button>
+                        </ToolbarHint>
+                      )}
+                      {upscaleModels && upscaleModels.length > 0 && (
+                        <>
+                          {upscaleModels.length > 1 && (
+                            <select
+                              title="Upscale model"
+                              className="h-5 bg-zinc-800 text-zinc-300 text-[10px] rounded border border-zinc-700 px-1 outline-none nodrag"
+                              value={selectedUpscaleModel}
+                              onChange={(e) => setSelectedUpscaleModel(e.target.value)}
+                              disabled={activeImageTool !== null}
+                            >
+                              {upscaleModels.map((m) => (
+                                <option key={m.falId} value={m.falId}>
+                                  {m.name}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <ToolbarHint label="Upscale" show={hoveredHint === 'Upscale'}>
+                            <button
+                              type="button"
+                              className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                              disabled={activeImageTool !== null || !selectedUpscaleModel}
+                              onClick={() => runImageTool('upscale', selectedUpscaleModel)}
+                              {...getHintHandlers('Upscale')}
+                            >
+                              {activeImageTool === 'upscale' ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : (
+                                <Sparkles size={11} />
+                              )}
+                            </button>
+                          </ToolbarHint>
+                        </>
+                      )}
                     </>
                   )}
-                  <div className="w-px h-3.5 bg-zinc-700/50" />
-                  <span className="text-[11px] font-medium text-zinc-200 whitespace-nowrap min-w-[96px]">
-                    {mediaActionHint}
-                  </span>
                 </>
               )}
             </>
@@ -1085,53 +1288,85 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
           )}
         </div>
       ) : isNote ? (
-        /* Sticky note — handwriting font, ruled lines, warm colors */
-        <div className="relative flex-1 min-h-0">
+        /* Sticky note — live rich text editor */
+        <div
+          className="relative flex-1 min-h-0"
+          style={{ backgroundImage: `repeating-linear-gradient(transparent, transparent 31px, ${noteTheme.lines} 31px, ${noteTheme.lines} 32px)` }}
+        >
           <div
-            contentEditable
-            suppressContentEditableWarning
-            className="nodrag nowheel note-lines font-note w-full h-full px-5 py-3 text-[18px] leading-[32px] text-amber-900/80 bg-transparent overflow-y-auto outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-amber-400/50 empty:before:pointer-events-none"
-            data-placeholder={config.placeholder}
-            onInput={(e) => {
-              const text = (e.target as HTMLDivElement).innerText
-              updateData({ prompt: text })
-            }}
-            onFocus={(e) => {
-              const el = e.target as HTMLDivElement
-              if (data.prompt && !el.innerText) {
-                el.innerText = data.prompt
-              }
-            }}
-            ref={(el) => {
-              if (el && data.prompt && !el.innerText) {
-                el.innerText = data.prompt
-              }
-            }}
-          />
+            className={`font-note px-5 py-3 h-full text-[18px] leading-[32px] [&_.tiptap_p]:leading-[32px] [&_.tiptap_h1]:text-xl [&_.tiptap_h1]:font-bold [&_.tiptap_h2]:text-lg [&_.tiptap_h2]:font-semibold [&_.tiptap_h3]:text-base [&_.tiptap_h3]:font-semibold [&_.tiptap_code]:text-sm [&_.tiptap_code]:bg-black/5 [&_.tiptap_code]:px-1 [&_.tiptap_code]:rounded [&_.tiptap_pre]:bg-black/5 [&_.tiptap_pre]:p-2 [&_.tiptap_pre]:rounded [&_.tiptap_blockquote]:border-l-2 [&_.tiptap_blockquote]:border-current/30 [&_.tiptap_blockquote]:pl-3 [&_.tiptap_blockquote]:italic [&_.tiptap_p.is-editor-empty:first-child::before]:opacity-40 [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none [&_.tiptap_p.is-editor-empty:first-child::before]:h-0 ${data.noteLocked ? 'pointer-events-none opacity-90' : ''}`}
+            style={{ color: noteTheme.text }}
+          >
+            <TiptapEditor
+              content={data.prompt}
+              onChange={(html) => updateData({ prompt: html })}
+              placeholder={config.placeholder}
+            />
+          </div>
+          {data.noteLocked && (
+            <div className="absolute top-2 right-2 pointer-events-none">
+              <Lock size={12} style={{ color: noteTheme.accent, opacity: 0.4 }} />
+            </div>
+          )}
           {/* Paper fold corner */}
           <div
             className="absolute bottom-0 right-0 w-5 h-5 pointer-events-none"
             style={{
-              background: 'linear-gradient(225deg, rgba(245,235,200,0) 50%, rgba(180,140,50,0.12) 50%)',
+              background: `linear-gradient(225deg, rgba(245,235,200,0) 50%, ${noteTheme.fold} 50%)`,
             }}
           />
         </div>
       ) : isTicket ? (
-        /* Ticket — structured card with description + status badges */
+        /* Ticket — live rich text editor */
         <div className="px-3 py-2.5 flex-1 flex flex-col min-h-0">
-          <textarea
-            className="nodrag nowheel w-full flex-1 text-sm text-zinc-300 bg-transparent resize-none outline-none placeholder:text-zinc-600 leading-relaxed"
-            placeholder={config.placeholder}
-            value={data.prompt}
-            onChange={(e) => updateData({ prompt: e.target.value })}
-          />
-          <div className="flex items-center gap-1.5 pt-2 mt-1 border-t border-zinc-800/50 flex-shrink-0">
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 font-medium">
-              To Do
-            </span>
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 font-medium">
-              Normal
-            </span>
+          <div className="flex-1 min-h-0 text-sm text-zinc-300 leading-relaxed [&_.tiptap_h1]:text-base [&_.tiptap_h1]:font-bold [&_.tiptap_h2]:text-sm [&_.tiptap_h2]:font-semibold [&_.tiptap_h3]:text-sm [&_.tiptap_h3]:font-semibold [&_.tiptap_p]:text-sm [&_.tiptap_p]:leading-relaxed [&_.tiptap_ul]:text-sm [&_.tiptap_ol]:text-sm [&_.tiptap_li]:text-sm [&_.tiptap_code]:text-xs [&_.tiptap_code]:bg-zinc-800 [&_.tiptap_code]:px-1 [&_.tiptap_code]:rounded [&_.tiptap_pre]:bg-zinc-800 [&_.tiptap_pre]:p-2 [&_.tiptap_pre]:rounded [&_.tiptap_blockquote]:border-l-2 [&_.tiptap_blockquote]:border-violet-500 [&_.tiptap_blockquote]:pl-3 [&_.tiptap_blockquote]:italic [&_.tiptap_blockquote]:text-zinc-400 [&_.tiptap_p.is-editor-empty:first-child::before]:text-zinc-600 [&_.tiptap_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-editor-empty:first-child::before]:float-left [&_.tiptap_p.is-editor-empty:first-child::before]:pointer-events-none [&_.tiptap_p.is-editor-empty:first-child::before]:h-0">
+            <TiptapEditor
+              content={data.prompt}
+              onChange={(html) => updateData({ prompt: html })}
+              placeholder={config.placeholder}
+            />
+          </div>
+          <div className="flex items-center gap-1.5 pt-2 mt-1 border-t border-zinc-800/50 flex-shrink-0 nodrag">
+            {/* Status toggle */}
+            <button
+              type="button"
+              className={`text-[9px] px-1.5 py-0.5 rounded font-medium cursor-pointer hover:opacity-80 transition-opacity ${TICKET_STATUS_CONFIG[data.ticketStatus || 'todo'].bg} ${TICKET_STATUS_CONFIG[data.ticketStatus || 'todo'].text}`}
+              onClick={() => {
+                const current = data.ticketStatus || 'todo'
+                const idx = TICKET_STATUSES.indexOf(current)
+                const next = TICKET_STATUSES[(idx + 1) % TICKET_STATUSES.length]
+                updateData({ ticketStatus: next })
+              }}
+            >
+              {TICKET_STATUS_CONFIG[data.ticketStatus || 'todo'].label}
+            </button>
+            {/* Priority toggle */}
+            <button
+              type="button"
+              className={`text-[9px] px-1.5 py-0.5 rounded font-medium cursor-pointer hover:opacity-80 transition-opacity ${TICKET_PRIORITY_CONFIG[data.ticketPriority || 'normal'].bg} ${TICKET_PRIORITY_CONFIG[data.ticketPriority || 'normal'].text}`}
+              onClick={() => {
+                const current = data.ticketPriority || 'normal'
+                const idx = TICKET_PRIORITIES.indexOf(current)
+                const next = TICKET_PRIORITIES[(idx + 1) % TICKET_PRIORITIES.length]
+                updateData({ ticketPriority: next })
+              }}
+            >
+              {TICKET_PRIORITY_CONFIG[data.ticketPriority || 'normal'].label}
+            </button>
+            {/* Tag */}
+            <select
+              title="Tag"
+              className="text-[9px] bg-transparent outline-none cursor-pointer text-zinc-400 hover:text-zinc-300 [&>option]:bg-zinc-900 [&>option]:text-zinc-300"
+              value={data.ticketTag || ''}
+              onChange={(e) => updateData({ ticketTag: e.target.value })}
+            >
+              {TICKET_TAGS.map((tag) => (
+                <option key={tag.value} value={tag.value}>{tag.label}</option>
+              ))}
+            </select>
+            {data.ticketTag && (
+              <span className={`w-1.5 h-1.5 rounded-full ${TICKET_TAGS.find((t) => t.value === data.ticketTag)?.color || 'bg-zinc-600'}`} />
+            )}
           </div>
         </div>
       ) : isWebsite ? (
@@ -1279,7 +1514,7 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
           background: PORT_TYPE_COLORS[outputType],
           width: 10,
           height: 10,
-          border: isNote ? '2px solid #fde68a' : '2px solid #27272a',
+          border: isNote ? `2px solid ${noteTheme.toolbarBorder}` : '2px solid #27272a',
         }}
       />
     </div>

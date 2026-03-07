@@ -580,6 +580,11 @@ async def coding_chat(req: CodingChatRequest):
 @router.websocket("/v1/coding/ws")
 async def coding_chat_ws(websocket: WebSocket):
     """Coding agent loop — resumable WebSocket streaming response."""
+    from main import check_websocket_origin
+    if not check_websocket_origin(websocket):
+        await websocket.close(code=4403, reason="Origin not allowed")
+        return
+
     await serve_resumable_websocket(
         websocket,
         session_manager=session_manager,

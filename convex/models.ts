@@ -361,6 +361,52 @@ const SEED_MODELS = [
     inputs: [PROMPT_INPUT],
     outputType: 'audio',
   },
+  // ── Image tools (upscale) ──
+  {
+    falId: 'fal-ai/topaz/upscale/image',
+    name: 'Topaz Upscale',
+    provider: 'Topaz',
+    providerType: 'fal',
+    contentType: 'upscale',
+    creditCost: 2,
+    pricingUnit: 'per generation',
+    inputs: [IMAGE_INPUT_REQUIRED],
+    outputType: 'image',
+  },
+  {
+    falId: 'fal-ai/seedvr/upscale/image',
+    name: 'SeedVR Upscale',
+    provider: 'ByteDance',
+    providerType: 'fal',
+    contentType: 'upscale',
+    creditCost: 1.5,
+    pricingUnit: 'per generation',
+    inputs: [IMAGE_INPUT_REQUIRED],
+    outputType: 'image',
+  },
+  {
+    falId: 'fal-ai/bria/upscale/creative',
+    name: 'Bria Creative Upscale',
+    provider: 'Bria',
+    providerType: 'fal',
+    contentType: 'upscale',
+    creditCost: 1.5,
+    pricingUnit: 'per generation',
+    inputs: [IMAGE_INPUT_REQUIRED],
+    outputType: 'image',
+  },
+  // ── Image tools (background removal) ──
+  {
+    falId: 'fal-ai/bria/background/remove',
+    name: 'Bria BG Remove',
+    provider: 'Bria',
+    providerType: 'fal',
+    contentType: 'remove_background',
+    creditCost: 0.5,
+    pricingUnit: 'per generation',
+    inputs: [IMAGE_INPUT_REQUIRED],
+    outputType: 'image',
+  },
   // ── Text models (LLM via OpenRouter) ──
   // creditCost=0 because text models bill per token usage, not flat rate.
   // inputTokenCost / outputTokenCost = credits per 1M tokens

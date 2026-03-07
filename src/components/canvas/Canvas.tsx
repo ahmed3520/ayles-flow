@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import {
   Background,
   BackgroundVariant,
@@ -36,10 +43,7 @@ import { reconnectOrRestore } from '@/data/sandbox-sync'
 import { useCanvasThumbnail } from '@/hooks/useCanvasThumbnail'
 import { useCanvasHistory } from '@/hooks/useCanvasHistory'
 import { useCanvasKeyboard } from '@/hooks/useCanvasKeyboard'
-import {
-  NODE_DEFAULTS,
-  PORT_TYPE_COLORS,
-} from '@/types/nodes'
+import { NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
 import {
   computeMaxNodeId,
   generateNodeId,
@@ -52,10 +56,12 @@ const nodeTypes = {
 
 type CanvasActions = {
   onGenerate: (nodeId: string) => void
+  onAgentSend: (message: string) => void
 }
 
 export const CanvasActionsContext = createContext<CanvasActions>({
-  onGenerate: () => { },
+  onGenerate: () => {},
+  onAgentSend: () => {},
 })
 
 export const useCanvasActions = () => useContext(CanvasActionsContext)
@@ -127,7 +133,10 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       setEdges,
       maxHistory: 50,
       onRestore: (snapshot) => {
-        nodeIdRef.current = Math.max(nodeIdRef.current, computeMaxNodeId(snapshot.nodes))
+        nodeIdRef.current = Math.max(
+          nodeIdRef.current,
+          computeMaxNodeId(snapshot.nodes),
+        )
       },
     })
 
@@ -156,7 +165,9 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
   const allModels = useQuery(api.models.list) ?? []
   const createGeneration = useMutation(api.generations.create)
   const setFalRequestId = useMutation(api.generations.setFalRequestId)
-  const completeTextGeneration = useMutation(api.generations.completeTextGeneration)
+  const completeTextGeneration = useMutation(
+    api.generations.completeTextGeneration,
+  )
 
   const agentModels = allModels.map((m) => ({
     falId: m.falId,
@@ -227,9 +238,11 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
 
         // Mark node as restoring
         const updateNodeData = (patch: Record<string, unknown>) =>
-          setNodes((prev) => prev.map((n) =>
-            n.id === node.id ? { ...n, data: { ...n.data, ...patch } } : n,
-          ))
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === node.id ? { ...n, data: { ...n.data, ...patch } } : n,
+            ),
+          )
 
         updateNodeData({ restoreStep: 'Connecting...' })
 
@@ -239,40 +252,44 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
             projectId: projectId as string,
             templateName: (nd.templateName as string) || undefined,
           },
-        }).then(async (response) => {
-          const res = response as unknown as Response
-          const reader = res.body?.getReader()
-          if (!reader) return
-          const decoder = new TextDecoder()
-          let buffer = ''
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            const lines = buffer.split('\n')
-            buffer = lines.pop() || ''
-            for (const line of lines) {
-              if (!line.trim()) continue
-              try {
-                const event = JSON.parse(line)
-                if (event.type === 'status') {
-                  updateNodeData({ restoreStep: event.step })
-                } else if (event.type === 'done') {
-                  updateNodeData({
-                    sandboxId: event.sandboxId,
-                    previewUrl: event.previewUrl,
-                    restoreStep: null,
-                  })
-                } else if (event.type === 'error') {
-                  updateNodeData({ restoreStep: `Error: ${event.message}` })
-                }
-              } catch { /* skip */ }
-            }
-          }
-        }).catch((e) => {
-          console.error('[sandbox-restore]', e)
-          updateNodeData({ restoreStep: 'Restore failed' })
         })
+          .then(async (response) => {
+            const res = response as unknown as Response
+            const reader = res.body?.getReader()
+            if (!reader) return
+            const decoder = new TextDecoder()
+            let buffer = ''
+            for (;;) {
+              const { done, value } = await reader.read()
+              if (done) break
+              buffer += decoder.decode(value, { stream: true })
+              const lines = buffer.split('\n')
+              buffer = lines.pop() || ''
+              for (const line of lines) {
+                if (!line.trim()) continue
+                try {
+                  const event = JSON.parse(line)
+                  if (event.type === 'status') {
+                    updateNodeData({ restoreStep: event.step })
+                  } else if (event.type === 'done') {
+                    updateNodeData({
+                      sandboxId: event.sandboxId,
+                      previewUrl: event.previewUrl,
+                      restoreStep: null,
+                    })
+                  } else if (event.type === 'error') {
+                    updateNodeData({ restoreStep: `Error: ${event.message}` })
+                  }
+                } catch {
+                  /* skip */
+                }
+              }
+            }
+          })
+          .catch((e) => {
+            console.error('[sandbox-restore]', e)
+            updateNodeData({ restoreStep: 'Restore failed' })
+          })
       }
     }
   }, [project])
@@ -368,16 +385,9 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
   )
 
   const getUploadNodeSize = useCallback(
-    (
-      contentType: NodeContentType,
-      metadata?: UploadMetadata,
-    ) => {
+    (contentType: NodeContentType, metadata?: UploadMetadata) => {
       const defaults = NODE_DEFAULTS[contentType]
-      if (
-        contentType !== 'image' ||
-        !metadata?.width ||
-        !metadata.height
-      ) {
+      if (contentType !== 'image' || !metadata?.width || !metadata.height) {
         return { width: defaults.width, height: defaults.height }
       }
 
@@ -412,10 +422,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
   )
 
   const getCenteredViewportPosition = useCallback(
-    (
-      contentType: NodeContentType,
-      nodeSize = NODE_DEFAULTS[contentType],
-    ) => {
+    (contentType: NodeContentType, nodeSize = NODE_DEFAULTS[contentType]) => {
       if (!reactFlowWrapper.current) return null
 
       const rect = reactFlowWrapper.current.getBoundingClientRect()
@@ -528,7 +535,10 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
         x: event.clientX,
         y: event.clientY,
         targetNode: node as Node<BlockNodeData>,
-        flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+        flowPosition: screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        }),
       })
     },
     [screenToFlowPosition],
@@ -541,7 +551,10 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
         x: event.clientX,
         y: event.clientY,
         targetNode: null,
-        flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+        flowPosition: screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        }),
       })
     },
     [screenToFlowPosition],
@@ -566,13 +579,17 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
           },
           submitToFal: (args) => submitToFal(args),
           setFalRequestId: async (args) => {
-            await setFalRequestId({ id: args.id as never, falRequestId: args.falRequestId })
+            await setFalRequestId({
+              id: args.id as never,
+              falRequestId: args.falRequestId,
+            })
           },
           submitToOpenRouter: async ({ data, onDelta }) => {
             const response = await submitToOpenRouter({ data })
-            const res = response instanceof Response
-              ? response
-              : new Response(JSON.stringify(response))
+            const res =
+              response instanceof Response
+                ? response
+                : new Response(JSON.stringify(response))
             if (!res.body) throw new Error('No response body')
 
             const reader = res.body.getReader()
@@ -591,14 +608,20 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
               for (const line of lines) {
                 if (!line.trim()) continue
                 let event: Record<string, unknown>
-                try { event = JSON.parse(line) } catch { continue }
+                try {
+                  event = JSON.parse(line)
+                } catch {
+                  continue
+                }
 
                 if (event.type === 'text_delta') {
                   fullText += event.content as string
                   onDelta(fullText)
                 } else if (event.type === 'done') {
                   fullText = (event.text as string) || fullText
-                  const u = event.usage as { inputTokens: number; outputTokens: number } | undefined
+                  const u = event.usage as
+                    | { inputTokens: number; outputTokens: number }
+                    | undefined
                   if (u) usage = u
                 } else if (event.type === 'error') {
                   throw new Error(event.message as string)
@@ -632,7 +655,13 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
         },
       )
     },
-    [getNode, setNodes, createGeneration, setFalRequestId, completeTextGeneration],
+    [
+      getNode,
+      setNodes,
+      createGeneration,
+      setFalRequestId,
+      completeTextGeneration,
+    ],
   )
 
   // Show loading until project data arrives
@@ -649,12 +678,23 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
 
   return (
     <div className="w-full h-full relative">
-      <div className="absolute left-4 top-1/2 -translate-y-1/2 z-10">
+      <div
+        className="pointer-events-none absolute left-3 right-3 bottom-3 z-10 md:left-4 md:right-auto md:top-1/2 md:bottom-auto md:-translate-y-1/2"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
         <Sidebar onAddNode={addNodeAtCenter} onAddUploadNode={addUploadNode} />
       </div>
 
       <div ref={reactFlowWrapper} className="w-full h-full">
-        <CanvasActionsContext.Provider value={{ onGenerate: handleGenerate }}>
+        <CanvasActionsContext.Provider
+          value={{
+            onGenerate: handleGenerate,
+            onAgentSend: (msg) => {
+              setShowAgent(true)
+              agent.send(msg)
+            },
+          }}
+        >
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -791,7 +831,9 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
               pushSnapshot(nodesRef.current, edgesRef.current)
               const nodeId = contextMenu.targetNode.id
               setNodes((nds) => nds.filter((n) => n.id !== nodeId))
-              setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
+              setEdges((eds) =>
+                eds.filter((e) => e.source !== nodeId && e.target !== nodeId),
+              )
             } else {
               handleDelete()
             }
@@ -800,7 +842,10 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
             if (contextMenu.targetNode) {
               // Select only the target node, then duplicate
               setNodes((nds) =>
-                nds.map((n) => ({ ...n, selected: n.id === contextMenu.targetNode!.id })),
+                nds.map((n) => ({
+                  ...n,
+                  selected: n.id === contextMenu.targetNode!.id,
+                })),
               )
               // Need a tick for selection to propagate
               requestAnimationFrame(() => handleDuplicate())

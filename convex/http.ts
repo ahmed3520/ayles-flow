@@ -10,7 +10,17 @@ export function extractMediaUrl(
   modelId: string,
   payload: Record<string, unknown>,
 ): { url: string; meta?: Record<string, unknown> } {
-  if (contentType === 'image') {
+  if (contentType === 'image' || contentType === 'remove_background' || contentType === 'upscale') {
+    // These models return {image: {url, ...}} or {images: [{url, ...}]}
+    const singleImage = payload.image as
+      | { url: string; width?: number; height?: number }
+      | undefined
+    if (singleImage?.url) {
+      return {
+        url: singleImage.url,
+        meta: { width: singleImage.width, height: singleImage.height },
+      }
+    }
     const images = payload.images as
       | Array<{
           url: string

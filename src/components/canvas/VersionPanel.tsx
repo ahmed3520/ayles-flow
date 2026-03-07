@@ -54,7 +54,7 @@ export default function VersionPanel({
   }
 
   return (
-    <div className="absolute right-4 top-4 bottom-4 z-20 w-72 flex flex-col bg-zinc-900 rounded-2xl border border-zinc-800 shadow-[0_4px_16px_rgba(0,0,0,0.4)] overflow-hidden">
+    <div className="absolute left-1/2 top-16 bottom-20 z-20 flex w-[calc(100vw-1.5rem)] max-w-[26rem] -translate-x-1/2 flex-col overflow-hidden rounded-[1.75rem] border border-zinc-800 bg-zinc-900 shadow-[0_4px_16px_rgba(0,0,0,0.4)] md:left-auto md:right-4 md:top-4 md:bottom-4 md:w-72 md:max-w-none md:translate-x-0 md:rounded-2xl">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
@@ -80,7 +80,7 @@ export default function VersionPanel({
               if (e.key === 'Enter') handleSaveVersion()
             }}
             placeholder="Version name..."
-            className="flex-1 px-3 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+            className="flex-1 px-3 py-1.5 text-[16px] bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 md:text-xs"
           />
           <button
             onClick={handleSaveVersion}
@@ -139,7 +139,7 @@ export default function VersionPanel({
                         {timeAgo(version.createdAt)}
                       </p>
                     </div>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => setConfirmRestore(version._id)}
                         className="p-1.5 rounded-lg hover:bg-zinc-700 transition-colors"
@@ -152,7 +152,10 @@ export default function VersionPanel({
                         className="p-1.5 rounded-lg hover:bg-zinc-700 transition-colors"
                         title="Delete version"
                       >
-                        <Trash2 size={12} className="text-zinc-500 hover:text-red-400" />
+                        <Trash2
+                          size={12}
+                          className="text-zinc-500 hover:text-red-400"
+                        />
                       </button>
                     </div>
                   </div>

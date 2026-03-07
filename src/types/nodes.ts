@@ -74,6 +74,13 @@ export type BlockNodeData = {
   deploymentStatus?: 'idle' | 'deploying' | 'ready' | 'error'
   // Restore status (transient, set during sandbox restoration)
   restoreStep?: string | null
+  // Note-specific fields
+  noteColor?: 'yellow' | 'green' | 'blue' | 'pink' | 'purple'
+  noteLocked?: boolean
+  // Ticket-specific fields
+  ticketStatus?: 'todo' | 'doing' | 'done'
+  ticketPriority?: 'low' | 'normal' | 'high' | 'urgent'
+  ticketTag?: string
 }
 
 export const AI_CONTENT_TYPES: Array<NodeContentType> = [

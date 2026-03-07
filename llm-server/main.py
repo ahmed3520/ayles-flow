@@ -12,7 +12,9 @@ Endpoints:
 
 import json
 import logging
+import os
 from typing import Optional
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -31,15 +33,38 @@ from stream_store import SessionManager
 logging.basicConfig(level=logging.INFO, format="[llm-server] %(message)s")
 log = logging.getLogger("llm-server")
 
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+
+ALLOWED_ORIGINS: list[str] = (
+    [
+        "https://aylesflow.com",
+        "https://www.aylesflow.com",
+    ]
+    if ENVIRONMENT == "production"
+    else ["*"]
+)
+
 app = FastAPI(title="Ayles LLM Server", version="1.0.0")
 chat_session_manager = SessionManager()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def check_websocket_origin(websocket: WebSocket) -> bool:
+    """Reject WebSocket connections from unauthorized origins in production."""
+    if ENVIRONMENT != "production":
+        return True
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return False
+    parsed = urlparse(origin)
+    allowed_hosts = {"aylesflow.com", "www.aylesflow.com"}
+    return parsed.scheme == "https" and parsed.hostname in allowed_hosts
 
 
 # ─── Request model ───────────────────────────────────────────────────
@@ -76,6 +101,10 @@ async def chat_stream(req: ChatRequest):
 @app.websocket("/v1/chat/ws")
 async def chat_stream_ws(websocket: WebSocket):
     """Streaming chat endpoint over resumable WebSocket."""
+    if not check_websocket_origin(websocket):
+        await websocket.close(code=4403, reason="Origin not allowed")
+        return
+
     async def chat_event_stream(req: ChatRequest):
         async for event in llm_client.stream_chat(
             req.messages,

@@ -43,7 +43,7 @@ type Chat = {
 
 type LucideIcon = typeof FileText
 
-const TOOL_ICON_MAP: Record<string, LucideIcon> = {
+const TOOL_ICON_MAP: Partial<Record<string, LucideIcon>> = {
   // File ops
   read: FileText,
   write: FileText,
@@ -81,7 +81,7 @@ const TOOL_ICON_MAP: Record<string, LucideIcon> = {
 }
 
 function getToolIcon(tool: string): LucideIcon {
-  return TOOL_ICON_MAP[tool] || Terminal
+  return TOOL_ICON_MAP[tool] ?? Terminal
 }
 
 function stripSandboxPath(s: unknown): string {
@@ -92,55 +92,154 @@ function truncCmd(s: unknown): string {
   return String(s || '').slice(0, 50)
 }
 
-type ToolLabel = { pending: (a: Record<string, unknown>) => string; done: (a: Record<string, unknown>) => string }
-
-const TOOL_DISPLAY: Record<string, ToolLabel> = {
-  // File ops
-  read:       { pending: (a) => `Reading ${stripSandboxPath(a.path)}`,  done: (a) => `Read ${stripSandboxPath(a.path)}` },
-  write:      { pending: (a) => `Writing ${stripSandboxPath(a.path)}`,  done: (a) => `Wrote ${stripSandboxPath(a.path)}` },
-  edit:       { pending: (a) => `Editing ${stripSandboxPath(a.path)}`,  done: (a) => `Edited ${stripSandboxPath(a.path)}` },
-  multi_edit: { pending: (a) => `Editing ${stripSandboxPath(a.path)}`,  done: (a) => `Edited ${stripSandboxPath(a.path)}` },
-  delete:     { pending: (a) => `Deleting ${stripSandboxPath(a.path)}`, done: (a) => `Deleted ${stripSandboxPath(a.path)}` },
-  mkdir:      { pending: (a) => `Creating ${stripSandboxPath(a.path)}`, done: (a) => `Created ${stripSandboxPath(a.path)}` },
-  move:       { pending: (a) => `Moving ${stripSandboxPath(a.from_path)} → ${stripSandboxPath(a.to_path)}`, done: (a) => `Moved ${stripSandboxPath(a.from_path)} → ${stripSandboxPath(a.to_path)}` },
-  // Shell (unified — action param for output/stop/list)
-  shell:         {
-    pending: (a) => a.action === 'output' ? `Reading output ${a.process_id}`
-      : a.action === 'stop' ? `Stopping ${a.process_id}`
-      : a.action === 'list' ? 'Listing processes'
-      : `Running ${truncCmd(a.command)}`,
-    done: (a) => a.action === 'output' ? `Output ${a.process_id}`
-      : a.action === 'stop' ? `Stopped ${a.process_id}`
-      : a.action === 'list' ? 'Listed processes'
-      : `Ran ${truncCmd(a.command)}`,
-  },
-  // Search
-  grep:       { pending: (a) => `Searching ${a.pattern}`,  done: (a) => `Searched ${a.pattern}` },
-  glob:       { pending: (a) => `Finding ${a.pattern}`,    done: (a) => `Found ${a.pattern}` },
-  ls:         { pending: (a) => `Listing ${stripSandboxPath(a.path || '.')}`, done: (a) => `Listed ${stripSandboxPath(a.path || '.')}` },
-  web_search: { pending: (a) => `Searching ${a.query}`,    done: (a) => `Searched ${a.query}` },
-  // Canvas
-  add_node:           { pending: () => 'Adding node',        done: (a) => `Added ${a.contentType || 'node'}` },
-  update_node:        { pending: () => 'Updating node',      done: (a) => `Updated ${a.nodeId}` },
-  delete_nodes:       { pending: () => 'Deleting nodes',     done: (a) => `Deleted ${(a.nodeIds as string[])?.length || 0} node(s)` },
-  clear_canvas:       { pending: () => 'Clearing canvas',    done: () => 'Cleared canvas' },
-  connect_nodes:      { pending: () => 'Connecting nodes',   done: (a) => `Connected ${a.sourceNodeId} → ${a.targetNodeId}` },
-  get_canvas_state:   { pending: () => 'Inspecting canvas',  done: () => 'Inspected canvas' },
-  get_available_models: { pending: () => 'Loading models',   done: () => 'Loaded models' },
-  // Research / long ops
-  deep_research:      { pending: (a) => `Researching ${a.topic}`,      done: (a) => `Researched ${a.topic}` },
-  create_pdf:         { pending: (a) => `Creating PDF ${a.title}`,     done: (a) => `Created PDF ${a.title}` },
-  create_sandbox:     { pending: () => 'Creating sandbox...',          done: (a) => `Created sandbox ${a.templateName}` },
-  create_project_spec: { pending: () => 'Creating project spec...',     done: () => 'Created project.md' },
-  run_coding_agent:   { pending: () => 'Running coding agent...',      done: () => 'Built project' },
-  // Sub-agent tools
-  lint:            { pending: (a) => `Linting ${stripSandboxPath(a.path)}`,    done: (a) => `Linted ${stripSandboxPath(a.path)}` },
-  workspace_info:  { pending: () => 'Inspecting workspace',                    done: () => 'Inspected workspace' },
-  load_skill:      { pending: (a) => `Loading skill ${a.name}`,               done: (a) => `Loaded skill ${a.name}` },
-  get_preview_url: { pending: (a) => `Getting preview port ${a.port}`,        done: (a) => `Preview port ${a.port}` },
+type ToolLabel = {
+  pending: (a: Record<string, unknown>) => string
+  done: (a: Record<string, unknown>) => string
 }
 
-function formatToolLabel(tool: string, args: Record<string, unknown>, status: 'pending' | 'done'): { verb: string; detail: string } {
+const TOOL_DISPLAY: Partial<Record<string, ToolLabel>> = {
+  // File ops
+  read: {
+    pending: (a) => `Reading ${stripSandboxPath(a.path)}`,
+    done: (a) => `Read ${stripSandboxPath(a.path)}`,
+  },
+  write: {
+    pending: (a) => `Writing ${stripSandboxPath(a.path)}`,
+    done: (a) => `Wrote ${stripSandboxPath(a.path)}`,
+  },
+  edit: {
+    pending: (a) => `Editing ${stripSandboxPath(a.path)}`,
+    done: (a) => `Edited ${stripSandboxPath(a.path)}`,
+  },
+  multi_edit: {
+    pending: (a) => `Editing ${stripSandboxPath(a.path)}`,
+    done: (a) => `Edited ${stripSandboxPath(a.path)}`,
+  },
+  delete: {
+    pending: (a) => `Deleting ${stripSandboxPath(a.path)}`,
+    done: (a) => `Deleted ${stripSandboxPath(a.path)}`,
+  },
+  mkdir: {
+    pending: (a) => `Creating ${stripSandboxPath(a.path)}`,
+    done: (a) => `Created ${stripSandboxPath(a.path)}`,
+  },
+  move: {
+    pending: (a) =>
+      `Moving ${stripSandboxPath(a.from_path)} → ${stripSandboxPath(a.to_path)}`,
+    done: (a) =>
+      `Moved ${stripSandboxPath(a.from_path)} → ${stripSandboxPath(a.to_path)}`,
+  },
+  // Shell (unified — action param for output/stop/list)
+  shell: {
+    pending: (a) =>
+      a.action === 'output'
+        ? `Reading output ${a.process_id}`
+        : a.action === 'stop'
+          ? `Stopping ${a.process_id}`
+          : a.action === 'list'
+            ? 'Listing processes'
+            : `Running ${truncCmd(a.command)}`,
+    done: (a) =>
+      a.action === 'output'
+        ? `Output ${a.process_id}`
+        : a.action === 'stop'
+          ? `Stopped ${a.process_id}`
+          : a.action === 'list'
+            ? 'Listed processes'
+            : `Ran ${truncCmd(a.command)}`,
+  },
+  // Search
+  grep: {
+    pending: (a) => `Searching ${a.pattern}`,
+    done: (a) => `Searched ${a.pattern}`,
+  },
+  glob: {
+    pending: (a) => `Finding ${a.pattern}`,
+    done: (a) => `Found ${a.pattern}`,
+  },
+  ls: {
+    pending: (a) => `Listing ${stripSandboxPath(a.path || '.')}`,
+    done: (a) => `Listed ${stripSandboxPath(a.path || '.')}`,
+  },
+  web_search: {
+    pending: (a) => `Searching ${a.query}`,
+    done: (a) => `Searched ${a.query}`,
+  },
+  // Canvas
+  add_node: {
+    pending: () => 'Adding node',
+    done: (a) => `Added ${a.contentType || 'node'}`,
+  },
+  update_node: {
+    pending: () => 'Updating node',
+    done: (a) => `Updated ${a.nodeId}`,
+  },
+  delete_nodes: {
+    pending: () => 'Deleting nodes',
+    done: (a) =>
+      `Deleted ${Array.isArray(a.nodeIds) ? a.nodeIds.length : 0} node(s)`,
+  },
+  clear_canvas: {
+    pending: () => 'Clearing canvas',
+    done: () => 'Cleared canvas',
+  },
+  connect_nodes: {
+    pending: () => 'Connecting nodes',
+    done: (a) => `Connected ${a.sourceNodeId} → ${a.targetNodeId}`,
+  },
+  get_canvas_state: {
+    pending: () => 'Inspecting canvas',
+    done: () => 'Inspected canvas',
+  },
+  get_available_models: {
+    pending: () => 'Loading models',
+    done: () => 'Loaded models',
+  },
+  // Research / long ops
+  deep_research: {
+    pending: (a) => `Researching ${a.topic}`,
+    done: (a) => `Researched ${a.topic}`,
+  },
+  create_pdf: {
+    pending: (a) => `Creating PDF ${a.title}`,
+    done: (a) => `Created PDF ${a.title}`,
+  },
+  create_sandbox: {
+    pending: () => 'Creating sandbox...',
+    done: (a) => `Created sandbox ${a.templateName}`,
+  },
+  create_project_spec: {
+    pending: () => 'Creating project spec...',
+    done: () => 'Created project.md',
+  },
+  run_coding_agent: {
+    pending: () => 'Running coding agent...',
+    done: () => 'Built project',
+  },
+  // Sub-agent tools
+  lint: {
+    pending: (a) => `Linting ${stripSandboxPath(a.path)}`,
+    done: (a) => `Linted ${stripSandboxPath(a.path)}`,
+  },
+  workspace_info: {
+    pending: () => 'Inspecting workspace',
+    done: () => 'Inspected workspace',
+  },
+  load_skill: {
+    pending: (a) => `Loading skill ${a.name}`,
+    done: (a) => `Loaded skill ${a.name}`,
+  },
+  get_preview_url: {
+    pending: (a) => `Getting preview port ${a.port}`,
+    done: (a) => `Preview port ${a.port}`,
+  },
+}
+
+function formatToolLabel(
+  tool: string,
+  args: Record<string, unknown>,
+  status: 'pending' | 'done',
+): { verb: string; detail: string } {
   const display = TOOL_DISPLAY[tool]
   if (!display) return { verb: tool, detail: '' }
   let label: string
@@ -175,22 +274,44 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
       className={`p-1 rounded text-zinc-600 hover:text-zinc-400 transition-colors ${className || ''}`}
       title={copied ? 'Copied!' : 'Copy'}
     >
-      {copied ? <Check size={12} className="text-emerald-500" /> : <ClipboardCopy size={12} />}
+      {copied ? (
+        <Check size={12} className="text-emerald-500" />
+      ) : (
+        <ClipboardCopy size={12} />
+      )}
     </button>
   )
 }
 
 // --- Tool call line (replaces ToolCallBadge) ---
 
-function ToolCallLine({ tool, args, status, error, label: legacyLabel }: { tool: string; args?: Record<string, unknown>; status?: 'pending' | 'done'; error?: boolean; label?: string }) {
+function ToolCallLine({
+  tool,
+  args,
+  status,
+  error,
+  label: legacyLabel,
+}: {
+  tool: string
+  args?: Record<string, unknown>
+  status?: 'pending' | 'done'
+  error?: boolean
+  label?: string
+}) {
   const Icon = getToolIcon(tool)
   const s = status || 'done'
   // Old messages stored in Convex have `label` string, new ones have `args` object
-  const { verb, detail } = args && Object.keys(args).length > 0
-    ? formatToolLabel(tool, args, s)
-    : legacyLabel
-      ? (() => { const m = legacyLabel.match(/^(\S+):?\s+(.*)$/); return m ? { verb: m[1].replace(/:$/, ''), detail: stripSandboxPath(m[2]) } : { verb: legacyLabel, detail: '' } })()
-      : { verb: tool, detail: '' }
+  const { verb, detail } =
+    args && Object.keys(args).length > 0
+      ? formatToolLabel(tool, args, s)
+      : legacyLabel
+        ? (() => {
+            const m = legacyLabel.match(/^(\S+):?\s+(.*)$/)
+            return m
+              ? { verb: m[1].replace(/:$/, ''), detail: stripSandboxPath(m[2]) }
+              : { verb: legacyLabel, detail: '' }
+          })()
+        : { verb: tool, detail: '' }
 
   return (
     <div className="flex items-center gap-1.5 py-0.5 text-xs group/tc">
@@ -201,13 +322,20 @@ function ToolCallLine({ tool, args, status, error, label: legacyLabel }: { tool:
       ) : (
         <Check size={13} className="text-zinc-500 shrink-0" />
       )}
-      <span className={`font-medium shrink-0 ${error ? 'text-red-400' : 'text-zinc-300'}`}>{verb}</span>
+      <span
+        className={`font-medium shrink-0 ${error ? 'text-red-400' : 'text-zinc-300'}`}
+      >
+        {verb}
+      </span>
       <Icon size={12} className="text-zinc-500 shrink-0" />
       {detail && (
         <span className="text-zinc-400 font-mono truncate">{detail}</span>
       )}
       {s !== 'pending' && detail && (
-        <CopyButton text={detail} className="opacity-0 group-hover/tc:opacity-100 ml-auto" />
+        <CopyButton
+          text={detail}
+          className="opacity-0 group-hover/tc:opacity-100 ml-auto"
+        />
       )}
     </div>
   )
@@ -217,8 +345,7 @@ function ToolCallLine({ tool, args, status, error, label: legacyLabel }: { tool:
 
 function ActionLine({ action }: { action: AgentAction }) {
   const labels: Record<AgentAction['type'], (a: AgentAction) => string> = {
-    add_node: (a) =>
-      `Added ${(a as { contentType: string }).contentType} node`,
+    add_node: (a) => `Added ${(a as { contentType: string }).contentType} node`,
     connect_nodes: (a) => {
       const c = a as { sourceNodeId: string; targetNodeId: string }
       return `Connected ${c.sourceNodeId} → ${c.targetNodeId}`
@@ -264,7 +391,9 @@ function ReasoningBlock({ content }: { content: string }) {
           className={`shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
         />
         <span className="font-medium">Thinking</span>
-        <span className="text-zinc-600 ml-auto">{content.length.toLocaleString()} chars</span>
+        <span className="text-zinc-600 ml-auto">
+          {content.length.toLocaleString()} chars
+        </span>
       </button>
       {open && (
         <div className="px-2.5 pb-2 text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-y-auto border-t border-zinc-700/30">
@@ -316,7 +445,9 @@ function MessageParts({
   isAnimating: boolean
 }) {
   // Group consecutive tool_call + action parts into compact blocks
-  const groups: Array<{ type: 'tools'; items: Array<MessagePart> } | MessagePart> = []
+  const groups: Array<
+    { type: 'tools'; items: Array<MessagePart> } | MessagePart
+  > = []
   for (const part of parts) {
     if (part.type === 'tool_call' || part.type === 'action') {
       const last = groups.at(-1)
@@ -338,7 +469,16 @@ function MessageParts({
             <div key={i} className="flex flex-col">
               {group.items.map((item, j) => {
                 if (item.type === 'tool_call') {
-                  return <ToolCallLine key={j} tool={item.tool} args={item.args} status={item.status || 'done'} error={item.error} label={(item as any).label} />
+                  return (
+                    <ToolCallLine
+                      key={j}
+                      tool={item.tool}
+                      args={item.args}
+                      status={item.status || 'done'}
+                      error={item.error}
+                      label={(item as any).label}
+                    />
+                  )
                 }
                 if (item.type === 'action') {
                   return <ActionLine key={j} action={item.action} />
@@ -349,7 +489,7 @@ function MessageParts({
           )
         }
 
-        const part = group as MessagePart
+        const part = group
         switch (part.type) {
           case 'text':
             return part.content ? (
@@ -357,7 +497,9 @@ function MessageParts({
                 key={i}
                 className="agent-markdown"
                 mode={
-                  isAnimating && i === groups.length - 1 ? 'streaming' : 'static'
+                  isAnimating && i === groups.length - 1
+                    ? 'streaming'
+                    : 'static'
                 }
                 plugins={streamdownPlugins}
               >
@@ -556,7 +698,11 @@ export default function AgentPanel({
 
   // Focus input on mount and when switching back to chat view
   useEffect(() => {
-    if (!showChatList) {
+    if (
+      !showChatList &&
+      typeof window !== 'undefined' &&
+      window.matchMedia('(min-width: 768px) and (pointer: fine)').matches
+    ) {
       inputRef.current?.focus()
     }
   }, [showChatList])
@@ -593,7 +739,7 @@ export default function AgentPanel({
     AGENT_MODELS.find((m) => m.id === agentModel)?.name ?? 'Custom'
 
   return (
-    <div className="absolute right-4 top-4 bottom-4 z-20 w-96 flex flex-col bg-zinc-900 rounded-2xl border border-zinc-800 shadow-[0_4px_24px_rgba(0,0,0,0.5)]">
+    <div className="absolute left-1/2 top-16 bottom-20 z-20 flex w-[calc(100vw-1.5rem)] max-w-[28rem] -translate-x-1/2 flex-col rounded-[1.75rem] border border-zinc-800 bg-zinc-900 shadow-[0_4px_24px_rgba(0,0,0,0.5)] md:left-auto md:right-4 md:top-4 md:bottom-4 md:w-96 md:max-w-none md:translate-x-0 md:rounded-2xl">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
@@ -748,16 +894,22 @@ export default function AgentPanel({
                 </button>
               </div>
             )}
-            <div className={`bg-zinc-800/60 border rounded-xl px-3 pt-2.5 pb-1.5 ${researchMode ? 'border-blue-500/30' : 'border-zinc-700/40'}`}>
+            <div
+              className={`bg-zinc-800/60 border rounded-xl px-3 pt-2.5 pb-1.5 ${researchMode ? 'border-blue-500/30' : 'border-zinc-700/40'}`}
+            >
               <div className="flex items-end gap-2">
                 <textarea
                   ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder={researchMode ? 'Enter a topic to research in depth...' : 'Tell the agent what to build...'}
+                  placeholder={
+                    researchMode
+                      ? 'Enter a topic to research in depth...'
+                      : 'Tell the agent what to build...'
+                  }
                   rows={1}
-                  className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 resize-none outline-none max-h-24 scrollbar-none"
+                  className="flex-1 bg-transparent text-[16px] text-zinc-200 placeholder:text-zinc-600 resize-none outline-none max-h-24 scrollbar-none md:text-sm"
                   style={{
                     height: 'auto',
                     minHeight: '20px',
@@ -829,7 +981,9 @@ export default function AgentPanel({
                       >
                         {m.name}
                         {m.comingSoon && (
-                          <span className="text-[9px] text-zinc-600 font-medium">Coming soon</span>
+                          <span className="text-[9px] text-zinc-600 font-medium">
+                            Coming soon
+                          </span>
                         )}
                       </button>
                     ))}
