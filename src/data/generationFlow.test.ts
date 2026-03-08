@@ -49,11 +49,7 @@ function createMockDeps(
     createGeneration: vi.fn().mockResolvedValue('gen-abc-123'),
     submitToFal: vi.fn().mockResolvedValue({ requestId: 'fal-req-456' }),
     setFalRequestId: vi.fn().mockResolvedValue(undefined),
-    submitToOpenRouter: vi.fn().mockImplementation(async ({ onDelta }) => {
-      onDelta('Generated text response')
-      return { text: 'Generated text response', usage: { inputTokens: 100, outputTokens: 50 } }
-    }),
-    completeTextGeneration: vi.fn().mockResolvedValue(undefined),
+    submitTextGeneration: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }

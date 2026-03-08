@@ -144,6 +144,17 @@ const SEED_MODELS = [
   },
   // ── Image models (text-to-image + image-to-image) ──
   {
+    falId: 'fal-ai/nano-banana-2',
+    name: 'Nano Banana 2',
+    provider: 'Nano Banana',
+    providerType: 'fal',
+    contentType: 'image',
+    creditCost: 0.5,
+    pricingUnit: 'per generation',
+    inputs: [PROMPT_INPUT, IMAGE_INPUT_OPTIONAL],
+    outputType: 'image',
+  },
+  {
     falId: 'fal-ai/bytedance/seedream/v5/lite/edit',
     name: 'Seedream 5.0 Lite',
     provider: 'ByteDance',

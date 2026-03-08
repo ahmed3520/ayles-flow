@@ -27,8 +27,46 @@ export type UpdateNodeAction = {
   type: 'update_node'
   nodeId: string
   prompt?: string
+  document?: string
+  findText?: string
+  replaceText?: string
+  replaceAll?: boolean
   model?: string
   label?: string
+}
+
+export type TextEditMode =
+  | 'replace_selection'
+  | 'insert_before_selection'
+  | 'insert_after_selection'
+  | 'insert_at_cursor'
+  | 'delete_selection'
+
+export type EditTextNodeAction = {
+  type: 'edit_text_node'
+  nodeId: string
+  mode: TextEditMode
+  text?: string
+}
+
+export type TextFormatTarget = 'selection' | 'current_block' | 'text'
+
+export type FormatTextNodeAction = {
+  type: 'format_text_node'
+  nodeId: string
+  target: TextFormatTarget
+  targetText?: string
+  format:
+    | 'bold'
+    | 'italic'
+    | 'heading'
+    | 'paragraph'
+    | 'bullet_list'
+    | 'ordered_list'
+    | 'blockquote'
+    | 'code_block'
+  level?: 1 | 2 | 3
+  replaceAll?: boolean
 }
 
 export type DeleteNodesAction = {
@@ -53,6 +91,8 @@ export type AgentAction =
   | AddNodeAction
   | ConnectNodesAction
   | UpdateNodeAction
+  | EditTextNodeAction
+  | FormatTextNodeAction
   | DeleteNodesAction
   | ClearCanvasAction
   | CreatePdfAction
@@ -153,11 +193,36 @@ export type CanvasNode = {
   contentType: NodeContentType
   label: string
   prompt: string
+  document?: string
+  documentText?: string
   model: string
   generationStatus: string
   resultUrl?: string
   x: number
   y: number
+}
+
+export type ActiveTextEditorSelection = {
+  from: number
+  to: number
+  text: string
+  textFrom: number
+  textTo: number
+  currentBlockText: string
+}
+
+export type ActiveTextEditorState = {
+  nodeId: string
+  label: string
+  document: string
+  documentText: string
+  selection: ActiveTextEditorSelection
+}
+
+export type AgentTextEditorBridge = {
+  nodeId: string
+  applyTextEditAction: (action: EditTextNodeAction) => boolean
+  applyTextFormatAction: (action: FormatTextNodeAction) => boolean
 }
 
 export type CanvasEdge = {
@@ -182,6 +247,7 @@ export type AgentChatInput = {
   canvasState: {
     nodes: Array<CanvasNode>
     edges: Array<CanvasEdge>
+    activeTextEditor?: ActiveTextEditorState | null
   }
   models: Array<AvailableModel>
   agentModel?: string

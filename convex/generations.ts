@@ -154,7 +154,16 @@ export const completeGeneration = internalMutation({
   },
 })
 
-export const completeTextGeneration = mutation({
+// ── Text generation (called by textGeneration.ts action) ─────────────
+
+export const getInternal = internalQuery({
+  args: { id: v.id('generations') },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id)
+  },
+})
+
+export const completeTextGeneration = internalMutation({
   args: {
     generationId: v.id('generations'),
     resultText: v.string(),
@@ -162,13 +171,9 @@ export const completeTextGeneration = mutation({
     outputTokens: v.number(),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity()
-    if (!identity) throw new Error('Not authenticated')
-
     const generation = await ctx.db.get(args.generationId)
     if (!generation) throw new Error('Generation not found')
 
-    // Look up model for token pricing
     const model = await ctx.db
       .query('models')
       .withIndex('by_falId', (q) => q.eq('falId', generation.modelId))
@@ -180,10 +185,10 @@ export const completeTextGeneration = mutation({
         (args.inputTokens / 1_000_000) * (model.inputTokenCost ?? 0)
       const outputCost =
         (args.outputTokens / 1_000_000) * (model.outputTokenCost ?? 0)
-      tokenCreditCost = Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000
+      tokenCreditCost =
+        Math.round((inputCost + outputCost) * 1_000_000) / 1_000_000
     }
 
-    // Deduct credits based on actual token usage
     const user = await ctx.db.get(generation.userId)
     if (user && tokenCreditCost > 0) {
       const currentCredits = user.credits ?? 0
@@ -211,6 +216,22 @@ export const completeTextGeneration = mutation({
     })
   },
 })
+
+export const failTextGeneration = internalMutation({
+  args: {
+    generationId: v.id('generations'),
+    errorMessage: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.generationId, {
+      status: 'error',
+      errorMessage: args.errorMessage,
+      completedAt: Date.now(),
+    })
+  },
+})
+
+// ── FAL generation failure ───────────────────────────────────────────
 
 export const failGeneration = internalMutation({
   args: {

@@ -22,6 +22,7 @@ import type * as migrateChatMessages from "../migrateChatMessages.js";
 import type * as models from "../models.js";
 import type * as projects from "../projects.js";
 import type * as testing from "../testing.js";
+import type * as textGeneration from "../textGeneration.js";
 import type * as todos from "../todos.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
@@ -48,6 +49,7 @@ declare const fullApi: ApiFromModules<{
   models: typeof models;
   projects: typeof projects;
   testing: typeof testing;
+  textGeneration: typeof textGeneration;
   todos: typeof todos;
   uploads: typeof uploads;
   users: typeof users;

@@ -2,7 +2,7 @@
  * AI Client — thin HTTP client to the Python LLM server.
  *
  * Same public interface as before (streamChat, chat) so all consumers
- * (agent.ts, coding-agent.ts, research.ts, openrouter-generate.ts, benchmark)
+ * (agent.ts, coding-agent.ts, research.ts, benchmark)
  * need zero changes. Caching is handled server-side in Python.
  */
 

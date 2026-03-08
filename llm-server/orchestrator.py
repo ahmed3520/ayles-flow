@@ -47,6 +47,8 @@ class CanvasNode(BaseModel):
     contentType: str
     label: str
     prompt: str
+    document: Optional[str] = None
+    documentText: Optional[str] = None
     model: str
     generationStatus: str
     resultUrl: Optional[str] = None
@@ -82,7 +84,7 @@ class AgentChatRequest(BaseModel):
 # --- Virtual state ---
 
 class VirtualState:
-    def __init__(self, nodes: list[dict], edges: list[dict]):
+    def __init__(self, nodes: list[dict], edges: list[dict], active_text_editor: Optional[dict] = None):
         self.nodes = [dict(n) for n in nodes]
         self.edges = [dict(e) for e in edges]
         max_num = 0
@@ -96,11 +98,178 @@ class VirtualState:
         self.template_name: Optional[str] = None
         self.preview_url: Optional[str] = None
         self.has_website_node = any(n.get("contentType") == "website" for n in self.nodes)
+        self.active_text_editor = dict(active_text_editor) if active_text_editor else None
+
+
+def _plain_text(value: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE)
+    text = re.sub(
+        r"</(p|div|h1|h2|h3|blockquote|li)>",
+        "\n",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"<li>", "- ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]*>", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return text.strip()
+
+
+def _node_text_excerpt(node: dict, max_chars: int = 220) -> str:
+    if node.get("contentType") == "text":
+        value = (node.get("documentText") or node.get("prompt") or "").strip()
+    else:
+        value = (node.get("prompt") or "").strip()
+    if not value:
+        return ""
+    return value[:max_chars] + ("..." if len(value) > max_chars else "")
+
+
+def _format_active_text_editor(editor: dict) -> str:
+    selection = editor.get("selection") or {}
+    selected_text = (selection.get("text") or "").strip()
+    current_block = (selection.get("currentBlockText") or "").strip()
+    selection_desc = (
+        f'selection="{selected_text[:180] + ("..." if len(selected_text) > 180 else "")}"'
+        if selected_text
+        else f'cursor={selection.get("textFrom", "?")}'
+    )
+    block_desc = (
+        f'currentBlock="{current_block[:180] + ("..." if len(current_block) > 180 else "")}"'
+        if current_block
+        else "currentBlock=(empty)"
+    )
+    return (
+        "Active text editor:\n"
+        f'- node={editor.get("nodeId", "?")} | label="{editor.get("label", "")}" | {selection_desc} | {block_desc}'
+    )
+
+
+def _get_active_text_editor_node(state: VirtualState, requested_node_id: Optional[str] = None) -> tuple[Optional[dict], Optional[dict], Optional[str]]:
+    editor = state.active_text_editor
+    if not editor:
+        return None, None, "No text editor is currently open."
+
+    node_id = editor.get("nodeId")
+    if requested_node_id and requested_node_id != node_id:
+        return None, None, f"Active text editor is on {node_id}, not {requested_node_id}."
+
+    node = next((n for n in state.nodes if n.get("id") == node_id), None)
+    if not node or node.get("contentType") != "text":
+        return None, None, f"Active text editor node {node_id} is unavailable."
+
+    return editor, node, None
+
+
+def _is_broad_search_pattern(pattern: str) -> bool:
+    return pattern.strip() in {
+        ".*",
+        ".+",
+        "^.*$",
+        "^.+$",
+        "(?s).*",
+        "(?s).+",
+        "(?m).*",
+        "(?m).+",
+    }
+
+
+def _read_text_node_content(state: VirtualState, node_id: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    if node_id:
+        node = next((n for n in state.nodes if n.get("id") == node_id), None)
+        if not node:
+            return None, f"Node {node_id} not found"
+        if node.get("contentType") != "text":
+            return None, f"Node {node_id} is not a text node"
+        editor = state.active_text_editor if state.active_text_editor and state.active_text_editor.get("nodeId") == node_id else None
+    else:
+        editor, node, error = _get_active_text_editor_node(state, None)
+        if error:
+            return None, error
+
+    if editor:
+        selection = editor.get("selection") or {}
+        parts = [
+            f'Text node {node.get("id")} ("{node.get("label", "")}")',
+            "Source: open text editor",
+        ]
+        if selection.get("text"):
+            parts.append(f'Selection:\n{selection.get("text", "").strip()}')
+        current_block = (selection.get("currentBlockText") or "").strip()
+        if current_block:
+            parts.append(f"Current block:\n{current_block}")
+        document_text = (editor.get("documentText") or "").strip()
+        if document_text:
+            parts.append(f"Full text:\n{document_text}")
+        return "\n\n".join(parts), None
+
+    document_text = (node.get("documentText") or _plain_text(node.get("document") or "")).strip()
+    return (
+        f'Text node {node.get("id")} ("{node.get("label", "")}")\n\nSource: saved text node\n\nFull text:\n{document_text}',
+        None,
+    )
+
+
+def _apply_active_editor_plain_text_edit(state: VirtualState, node: dict, editor: dict, mode: str, text: str = "") -> Optional[str]:
+    selection = editor.get("selection") or {}
+    text_from = selection.get("textFrom")
+    text_to = selection.get("textTo")
+    if not isinstance(text_from, int) or not isinstance(text_to, int):
+        return "Active text editor selection is missing plain-text offsets."
+
+    document_text = editor.get("documentText")
+    if not isinstance(document_text, str):
+        document_text = node.get("documentText") or _plain_text(node.get("document") or "")
+
+    if text_from < 0 or text_to < text_from or text_to > len(document_text):
+        return "Active text editor selection offsets are invalid."
+
+    if mode == "replace_selection":
+        if text_from == text_to:
+            return "replace_selection requires a non-empty selection."
+        next_text = document_text[:text_from] + text + document_text[text_to:]
+        cursor = text_from + len(text)
+    elif mode == "insert_before_selection":
+        next_text = document_text[:text_from] + text + document_text[text_from:]
+        shift = len(text)
+        selection["textFrom"] = text_from + shift
+        selection["textTo"] = text_to + shift
+        node["documentText"] = next_text
+        node["prompt"] = next_text
+        editor["documentText"] = next_text
+        return None
+    elif mode == "insert_after_selection":
+        next_text = document_text[:text_to] + text + document_text[text_to:]
+        cursor = text_to + len(text)
+    elif mode == "insert_at_cursor":
+        if text_from != text_to:
+            return "insert_at_cursor requires a collapsed cursor selection."
+        next_text = document_text[:text_from] + text + document_text[text_from:]
+        cursor = text_from + len(text)
+    elif mode == "delete_selection":
+        if text_from == text_to:
+            return "delete_selection requires a non-empty selection."
+        next_text = document_text[:text_from] + document_text[text_to:]
+        cursor = text_from
+    else:
+        return f"Unsupported edit_text mode: {mode}"
+
+    node["documentText"] = next_text
+    node["prompt"] = next_text
+    editor["documentText"] = next_text
+    selection["text"] = ""
+    selection["textFrom"] = cursor
+    selection["textTo"] = cursor
+    return None
 
 
 def _format_canvas_state(state: VirtualState) -> str:
     if not state.nodes:
-        return "Canvas is empty — no nodes or edges."
+        base = "Canvas is empty — no nodes or edges."
+        if not state.active_text_editor:
+            return base
+        return base + "\n\n" + _format_active_text_editor(state.active_text_editor)
     node_lines = []
     for n in state.nodes:
         parts = [f"- {n['id']}: type={n['contentType']}"]
@@ -108,8 +277,10 @@ def _format_canvas_state(state: VirtualState) -> str:
         parts.append(f"pos=({n.get('x', 0)}, {n.get('y', 0)})")
         if n.get("model"):
             parts.append(f'model="{n["model"]}"')
-        if n.get("prompt"):
-            parts.append(f'prompt="{n["prompt"]}"')
+        excerpt = _node_text_excerpt(n)
+        if excerpt:
+            field_name = "document" if n.get("contentType") == "text" else "prompt"
+            parts.append(f'{field_name}="{excerpt}"')
         parts.append(f"status={n.get('generationStatus', 'idle')}")
         if n.get("resultUrl"):
             parts.append("[HAS RESULT - can be connected as input to other nodes]")
@@ -119,7 +290,13 @@ def _format_canvas_state(state: VirtualState) -> str:
         [f"- {e['id']}: {e['source']} → {e['target']} ({e.get('sourceHandle', '')} → {e.get('targetHandle', '')})" for e in state.edges]
         if state.edges else ["(no connections)"]
     )
-    return f"Nodes ({len(state.nodes)}):\n" + "\n".join(node_lines) + f"\n\nEdges ({len(state.edges)}):\n" + "\n".join(edge_lines)
+    sections = [
+        f"Nodes ({len(state.nodes)}):\n" + "\n".join(node_lines),
+        f"Edges ({len(state.edges)}):\n" + "\n".join(edge_lines),
+    ]
+    if state.active_text_editor:
+        sections.append(_format_active_text_editor(state.active_text_editor))
+    return "\n\n".join(sections)
 
 
 def _format_models(models: list[dict], content_type: Optional[str] = None) -> str:
@@ -154,13 +331,14 @@ def _build_runtime_context(state: VirtualState, models: list[dict]) -> str:
     """Compact runtime snapshot to avoid unnecessary discovery tool calls."""
     node_lines = []
     for n in state.nodes[:12]:
-        prompt = (n.get("prompt") or "").strip()
+        prompt = _node_text_excerpt(n, 120)
         if prompt:
-            prompt = prompt[:120] + ("..." if len(prompt) > 120 else "")
+            label = "document" if n.get("contentType") == "text" else "prompt"
+            prompt = f"{label}={json.dumps(prompt)}"
         else:
-            prompt = "(empty)"
+            prompt = "text=(empty)"
         node_lines.append(
-            f"- {n.get('id', '?')} | type={n.get('contentType', '?')} | label={json.dumps(n.get('label', ''))} | status={n.get('generationStatus', 'idle')} | prompt={json.dumps(prompt)}"
+            f"- {n.get('id', '?')} | type={n.get('contentType', '?')} | label={json.dumps(n.get('label', ''))} | status={n.get('generationStatus', 'idle')} | {prompt}"
         )
     if len(state.nodes) > 12:
         node_lines.append(f"- ... and {len(state.nodes) - 12} more nodes")
@@ -176,8 +354,14 @@ def _build_runtime_context(state: VirtualState, models: list[dict]) -> str:
         f"Canvas snapshot (current request): nodes={len(state.nodes)}, edges={len(state.edges)}, hasWebsiteNode={state.has_website_node}.",
         "Nodes:",
         *(node_lines if node_lines else ["- (none)"]),
+        "Active text editor:",
+        *(
+            _format_active_text_editor(state.active_text_editor).splitlines()[1:]
+            if state.active_text_editor
+            else ["- (none)"]
+        ),
         f"Available model counts: {model_parts}.",
-        "This snapshot is current. Only call get_canvas_state/get_available_models if you need full details beyond this snapshot.",
+        "This snapshot is current. Only call get_canvas_state/get_available_models if you need more overview details. Call read_text when you need the full content of a text document.",
         "</runtime_context>",
     ]
     return "\n".join(lines)
@@ -186,12 +370,16 @@ def _build_runtime_context(state: VirtualState, models: list[dict]) -> str:
 # --- Tool definitions (OpenAI function calling format) ---
 
 ORCHESTRATOR_TOOLS: list[dict] = [
-    {"type": "function", "function": {"name": "get_canvas_state", "description": "Get full canvas state (all nodes/edges) when the runtime snapshot is insufficient for the task.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "get_canvas_state", "description": "Get a canvas summary (nodes, edges, active editor metadata, short text excerpts) when the runtime snapshot is insufficient for the task. Use this for overview, not for reading a full document.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "search_text", "description": "Search inside text content stored on the canvas, including text-node editor documents. Use this to locate exact wording, not to dump an entire document.", "parameters": {"type": "object", "properties": {"pattern": {"type": "string", "description": "Regular expression to search for inside canvas text."}, "nodeId": {"type": "string", "description": "Optional: restrict search to one node."}, "contentType": {"type": "string", "enum": ["text", "note", "ticket", "image", "video", "audio", "music", "pdf", "website"], "description": "Optional: restrict search to one node content type."}, "caseInsensitive": {"type": "boolean", "description": "Case-insensitive search."}, "maxResults": {"type": "integer", "description": "Maximum number of matches to return. Default 20."}}, "required": ["pattern"]}}},
+    {"type": "function", "function": {"name": "read_text", "description": "Read the full plain-text content of a text node or the currently open text editor. Use this when the user refers to the current open document or when you need the full document before reviewing or editing it.", "parameters": {"type": "object", "properties": {"nodeId": {"type": "string", "description": "Optional: specific text node to read. Omit to read the active open text editor."}}}}},
+    {"type": "function", "function": {"name": "edit_text", "description": "Edit the live Tiptap text editor using the current selection or cursor in the open text workspace.", "parameters": {"type": "object", "properties": {"nodeId": {"type": "string", "description": "Optional: target a specific open text node. Omit to use the active text editor."}, "mode": {"type": "string", "enum": ["replace_selection", "insert_before_selection", "insert_after_selection", "insert_at_cursor", "delete_selection"], "description": "Editing operation to apply in the live editor."}, "text": {"type": "string", "description": "Text to insert or use as the replacement. Required for every mode except delete_selection."}}, "required": ["mode"]}}},
+    {"type": "function", "function": {"name": "format_text", "description": "Apply rich-text formatting inside a text-node document. Use target='selection' or target='current_block' for the live Tiptap editor, or target='text' to format matching content inside a saved text-node document.", "parameters": {"type": "object", "properties": {"nodeId": {"type": "string", "description": "Optional for target='selection' or target='current_block' when a text editor is open. Required for target='text'."}, "target": {"type": "string", "enum": ["selection", "current_block", "text"], "description": "What to format: the live selection, the current block at the cursor, or matching text in a saved document."}, "targetText": {"type": "string", "description": "Required when target='text'. Exact text or block text to target inside the document."}, "format": {"type": "string", "enum": ["bold", "italic", "heading", "paragraph", "bullet_list", "ordered_list", "blockquote", "code_block"], "description": "Formatting operation to apply."}, "level": {"type": "integer", "enum": [1, 2, 3], "description": "Required when format='heading'."}, "replaceAll": {"type": "boolean", "description": "Apply formatting to all matches instead of only the first one."}}, "required": ["target", "format"]}}},
     {"type": "function", "function": {"name": "get_available_models", "description": "Get the full list of available AI models grouped by category. Use when you need exact model IDs or model capabilities.", "parameters": {"type": "object", "properties": {"contentType": {"type": "string", "enum": ["image", "video", "audio", "music"], "description": "Optional: filter by content type."}}}}},
     {"type": "function", "function": {"name": "web_search", "description": "Search the web or visit a URL for real-time information.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Search query or URL"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "add_node", "description": "Add a new node to the canvas.", "parameters": {"type": "object", "properties": {"contentType": {"type": "string", "enum": ["image", "video", "audio", "music", "text", "note", "website"]}, "prompt": {"type": "string"}, "model": {"type": "string"}, "label": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "previewUrl": {"type": "string"}, "sandboxId": {"type": "string"}}, "required": ["contentType"]}}},
     {"type": "function", "function": {"name": "connect_nodes", "description": "Connect two nodes with an edge.", "parameters": {"type": "object", "properties": {"sourceNodeId": {"type": "string"}, "targetNodeId": {"type": "string"}, "portType": {"type": "string", "enum": ["text", "image", "audio", "video", "pdf"]}}, "required": ["sourceNodeId", "targetNodeId", "portType"]}}},
-    {"type": "function", "function": {"name": "update_node", "description": "Update an existing IDLE node's prompt, model, or label.", "parameters": {"type": "object", "properties": {"nodeId": {"type": "string"}, "prompt": {"type": "string"}, "model": {"type": "string"}, "label": {"type": "string"}}, "required": ["nodeId"]}}},
+    {"type": "function", "function": {"name": "update_node", "description": "Update an existing node. Use this for IDLE nodes, or for completed text nodes when editing their document content. For text documents, prefer document for full rewrites or findText + replaceText for precise edits.", "parameters": {"type": "object", "properties": {"nodeId": {"type": "string"}, "prompt": {"type": "string"}, "document": {"type": "string"}, "findText": {"type": "string"}, "replaceText": {"type": "string"}, "replaceAll": {"type": "boolean"}, "model": {"type": "string"}, "label": {"type": "string"}}, "required": ["nodeId"]}}},
     {"type": "function", "function": {"name": "delete_nodes", "description": "Delete one or more nodes and their connected edges.", "parameters": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}}, "required": ["nodeIds"]}}},
     {"type": "function", "function": {"name": "clear_canvas", "description": "Remove ALL nodes and edges from the canvas.", "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {"name": "deep_research", "description": "Perform deep multi-step web research on a topic. Creates a note node with the full document.", "parameters": {"type": "object", "properties": {"topic": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}}, "required": ["topic"]}}},
@@ -318,7 +506,7 @@ def _generate_project_spec(args: dict) -> str:
 
 # --- Helpers ---
 
-LARGE_ARG_KEYS = {"content", "markdown", "old_string", "new_string", "edits", "features", "data_models", "acceptance_criteria"}
+LARGE_ARG_KEYS = {"content", "markdown", "old_string", "new_string", "document", "text", "edits", "features", "data_models", "acceptance_criteria"}
 
 
 def _strip_large_args(args: dict) -> dict:
@@ -366,6 +554,139 @@ async def _execute_tool(
 
     if name == "get_canvas_state":
         return _format_canvas_state(state), None, None
+
+    elif name == "search_text":
+        pattern = args.get("pattern", "")
+        if not pattern:
+            return json.dumps({"error": "Pattern is required"}), None, None
+        if _is_broad_search_pattern(pattern):
+            return json.dumps({"error": "search_text requires a specific pattern. Use read_text to read a full document."}), None, None
+
+        flags = re.IGNORECASE if args.get("caseInsensitive") else 0
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error as e:
+            return json.dumps({"error": f"Invalid regex: {e}"}), None, None
+
+        max_results = max(1, min(int(args.get("maxResults") or 20), 100))
+        matches: list[str] = []
+
+        for node in state.nodes:
+            if args.get("nodeId") and node.get("id") != args.get("nodeId"):
+                continue
+            if args.get("contentType") and node.get("contentType") != args.get("contentType"):
+                continue
+
+            search_fields = []
+            if node.get("contentType") == "text":
+                document_text = node.get("documentText") or _plain_text(node.get("document") or "")
+                if document_text:
+                    search_fields.append(("document", document_text))
+            prompt_text = node.get("prompt") or ""
+            if prompt_text and (node.get("contentType") != "text" or not search_fields):
+                search_fields.append(("prompt", prompt_text))
+
+            for field_name, value in search_fields:
+                for line_index, line in enumerate(value.splitlines() or [value], start=1):
+                    if regex.search(line):
+                        matches.append(
+                            f'- {node.get("id")} | type={node.get("contentType")} | field={field_name} | line={line_index} | {line.strip()}'
+                        )
+                        if len(matches) >= max_results:
+                            break
+                if len(matches) >= max_results:
+                    break
+            if len(matches) >= max_results:
+                break
+
+        if not matches:
+            return f'No matches for /{pattern}/ in canvas text.', None, None
+
+        return (
+            f'Matches for /{pattern}/ ({len(matches)} shown):\n' + "\n".join(matches),
+            None,
+            None,
+        )
+
+    elif name == "read_text":
+        result, error = _read_text_node_content(state, args.get("nodeId"))
+        if error:
+            return json.dumps({"error": error}), None, None
+        return result or "Text document is empty.", None, None
+
+    elif name == "edit_text":
+        mode = args.get("mode", "")
+        text = args.get("text")
+        if not mode:
+            return json.dumps({"error": "mode is required"}), None, None
+        if mode != "delete_selection" and not isinstance(text, str):
+            return json.dumps({"error": "text is required for this edit_text mode"}), None, None
+
+        editor, node, error = _get_active_text_editor_node(state, args.get("nodeId"))
+        if error:
+            return json.dumps({"error": error}), None, None
+
+        edit_error = _apply_active_editor_plain_text_edit(
+            state,
+            node,
+            editor,
+            mode,
+            text or "",
+        )
+        if edit_error:
+            return json.dumps({"error": edit_error}), None, None
+
+        action = {
+            "type": "edit_text_node",
+            "nodeId": node["id"],
+            "mode": mode,
+        }
+        if isinstance(text, str):
+            action["text"] = text
+
+        return json.dumps({"success": True, "nodeId": node["id"]}), action, None
+
+    elif name == "format_text":
+        target = args.get("target", "")
+        fmt = args.get("format", "")
+        if target not in ("selection", "current_block", "text") or not fmt:
+            return json.dumps({"error": "target and format are required"}), None, None
+        if fmt == "heading" and args.get("level") not in (1, 2, 3):
+            return json.dumps({"error": "level must be 1, 2, or 3 when format='heading'"}), None, None
+
+        if target in ("selection", "current_block"):
+            editor, node, error = _get_active_text_editor_node(state, args.get("nodeId"))
+            if error:
+                return json.dumps({"error": error}), None, None
+            if target == "selection" and not (editor.get("selection") or {}).get("text"):
+                return json.dumps({"error": "format_text target='selection' requires a non-empty selection"}), None, None
+            node_id = node["id"]
+            target_text = None
+        else:
+            node_id = args.get("nodeId", "")
+            node = next((n for n in state.nodes if n["id"] == node_id), None)
+            if not node:
+                return json.dumps({"error": f"Node {node_id} not found"}), None, None
+            if node.get("contentType") != "text":
+                return json.dumps({"error": f"Node {node_id} is not a text node"}), None, None
+            target_text = (args.get("targetText") or "").strip()
+            if not target_text:
+                return json.dumps({"error": "targetText is required when target='text'"}), None, None
+
+        action = {
+            "type": "format_text_node",
+            "nodeId": node_id,
+            "target": target,
+            "format": fmt,
+        }
+        if target_text:
+            action["targetText"] = target_text
+        if "level" in args:
+            action["level"] = args["level"]
+        if "replaceAll" in args:
+            action["replaceAll"] = args["replaceAll"]
+
+        return json.dumps({"success": True}), action, None
 
     elif name == "get_available_models":
         return _format_models(models, args.get("contentType")), None, None
@@ -425,8 +746,44 @@ async def _execute_tool(
         node = next((n for n in state.nodes if n["id"] == node_id), None)
         if not node:
             return json.dumps({"error": f"Node {node_id} not found"}), None, None
+        is_text_node = node.get("contentType") == "text"
+        active_editor = state.active_text_editor if state.active_text_editor and state.active_text_editor.get("nodeId") == node_id else None
+
+        if "document" in args and is_text_node:
+            node["document"] = args["document"]
+            node["documentText"] = _plain_text(args["document"])
+            node["prompt"] = node["documentText"]
+            if active_editor is not None:
+                active_editor["document"] = args["document"]
+                active_editor["documentText"] = node["documentText"]
+        elif "findText" in args and "replaceText" in args and is_text_node:
+            current_document = node.get("document") or node.get("prompt", "")
+            find_text = args.get("findText") or ""
+            replace_text = args.get("replaceText") or ""
+            if not find_text:
+                return json.dumps({"error": "findText is required for document replacement"}), None, None
+            if find_text not in current_document:
+                return json.dumps({"error": f'findText not found in node {node_id}'}), None, None
+            if args.get("replaceAll"):
+                next_document = current_document.replace(find_text, replace_text)
+            else:
+                next_document = current_document.replace(find_text, replace_text, 1)
+            node["document"] = next_document
+            node["documentText"] = _plain_text(next_document)
+            node["prompt"] = node["documentText"]
+            if active_editor is not None:
+                active_editor["document"] = next_document
+                active_editor["documentText"] = node["documentText"]
         if "prompt" in args:
-            node["prompt"] = args["prompt"]
+            if is_text_node:
+                node["document"] = args["prompt"]
+                node["documentText"] = _plain_text(args["prompt"])
+                node["prompt"] = node["documentText"]
+                if active_editor is not None:
+                    active_editor["document"] = args["prompt"]
+                    active_editor["documentText"] = node["documentText"]
+            else:
+                node["prompt"] = args["prompt"]
         if "model" in args:
             node["model"] = args["model"]
         if "label" in args:
@@ -434,6 +791,14 @@ async def _execute_tool(
         action = {"type": "update_node", "nodeId": node_id}
         if "prompt" in args:
             action["prompt"] = args["prompt"]
+        if "document" in args:
+            action["document"] = args["document"]
+        if "findText" in args:
+            action["findText"] = args["findText"]
+        if "replaceText" in args:
+            action["replaceText"] = args["replaceText"]
+        if "replaceAll" in args:
+            action["replaceAll"] = args["replaceAll"]
         if "model" in args:
             action["model"] = args["model"]
         if "label" in args:
@@ -664,6 +1029,7 @@ async def _agent_event_stream(req: AgentChatRequest):
         state = VirtualState(
             req.canvasState.get("nodes", []),
             req.canvasState.get("edges", []),
+            req.canvasState.get("activeTextEditor"),
         )
 
         event_queue: asyncio.Queue = asyncio.Queue()
@@ -1026,6 +1392,7 @@ Each node is a block with:
 NEVER edit a completed node's prompt to "modify" its output. That would re-generate from scratch and lose the original result.
 Instead, to edit/modify/restyle/vary any existing result: create a NEW node downstream, connect the original's output to the new node's input, and set the new prompt to describe the desired change.
 This is the CORE CONCEPT of the infinite canvas — every modification is a new node in the pipeline, preserving the history of all generations.
+Exception: completed text nodes behave like editable documents. You may use update_node to revise the text content inside an existing completed text node.
 </critical_rule>
 
 <when_to_use_update_node>
@@ -1033,8 +1400,25 @@ Only use update_node for nodes that are IDLE (not yet generated):
 - Fixing a typo in a prompt before the user generates
 - Changing the model selection before generation
 - Updating a label
-NEVER use update_node on a completed node to "edit" its result. Always create a new downstream node instead.
+Exception: if contentType="text" and the node already contains document text, you MAY use update_node to edit that text directly.
+NEVER use update_node on a completed media node to "edit" its result. Always create a new downstream node instead.
 </when_to_use_update_node>
+
+<text_document_tools>
+Text nodes can contain full editor documents, not just prompts.
+- When a text workspace is open, the runtime snapshot tells you which editor is open plus its current selection text, current block text, and cursor/selection offsets.
+- The runtime snapshot and get_canvas_state are for overview only. They do not replace reading the actual document.
+- When the user refers to "this" open document or asks for feedback on the current editor content, call read_text first.
+- Use search_text to find exact text inside saved text-node documents when you need to search across the canvas.
+- Never use search_text with broad patterns like `.*` to dump a whole document. Use read_text instead.
+- Use read_text to fetch the full plain-text content of a text node or the open editor on demand.
+- Use edit_text for live selection-aware or cursor-aware edits in the open Tiptap editor.
+- Use format_text(target="selection" or target="current_block") for live editor formatting changes like bold, headings, lists, quotes, and code blocks.
+- Use format_text(target="text") when you need to format matching text inside a saved text-node document.
+- Use update_node(document="...") to replace the whole document.
+- Use update_node(findText="...", replaceText="...") for precise text edits inside a completed text-node document.
+- If you are editing a text document, operate on the document content, not the node prompt.
+</text_document_tools>
 
 <workflow_patterns>
 

@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
@@ -19,24 +12,29 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useMutation, useQuery } from 'convex/react'
+import { useAction, useMutation, useQuery } from 'convex/react'
 import { Bot, Check, Clock, Loader2, Redo2, Undo2 } from 'lucide-react'
 
 import { api } from '../../../convex/_generated/api'
 
 import AgentPanel from './AgentPanel'
+import { CanvasActionsContext } from './CanvasActionsContext'
 import BlockNodeComponent from './nodes/BlockNode'
 import ContextMenu from './ContextMenu'
 import Sidebar from './Sidebar'
+import TextEditorWorkspace from './TextEditorWorkspace'
 import VersionPanel from './VersionPanel'
 import type { Connection, Edge, Node, OnConnect } from '@xyflow/react'
 import type { Id } from '../../../convex/_generated/dataModel'
+import type {
+  ActiveTextEditorState,
+  AgentTextEditorBridge,
+} from '@/types/agent'
 import type { BlockNodeData, NodeContentType, PortType } from '@/types/nodes'
 import type { SaveStatus } from '@/hooks/useAutoSave'
 import type { UploadMetadata } from '@/types/uploads'
 import { submitToFal } from '@/data/fal'
 import { executeGeneration } from '@/data/generationFlow'
-import { submitToOpenRouter } from '@/data/openrouter-generate'
 import { useAgentChat } from '@/hooks/useAgentChat'
 import { useAutoSave } from '@/hooks/useAutoSave'
 import { reconnectOrRestore } from '@/data/sandbox-sync'
@@ -47,24 +45,14 @@ import { NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
 import {
   computeMaxNodeId,
   generateNodeId,
+  normalizeEdgeHandleIds,
   validateConnection,
 } from '@/utils/canvasUtils'
+import { getTextNodeDocumentUpdate } from '@/utils/nodeTextUtils'
 
 const nodeTypes = {
   blockNode: BlockNodeComponent,
 }
-
-type CanvasActions = {
-  onGenerate: (nodeId: string) => void
-  onAgentSend: (message: string) => void
-}
-
-export const CanvasActionsContext = createContext<CanvasActions>({
-  onGenerate: () => {},
-  onAgentSend: () => {},
-})
-
-export const useCanvasActions = () => useContext(CanvasActionsContext)
 
 function SaveIndicator({ status }: { status: SaveStatus }) {
   if (status === 'saving') {
@@ -104,6 +92,9 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
   const [isLoaded, setIsLoaded] = useState(false)
   const [showVersions, setShowVersions] = useState(false)
   const [showAgent, setShowAgent] = useState(false)
+  const [activeTextWorkspaceNodeId, setActiveTextWorkspaceNodeId] = useState<
+    string | null
+  >(null)
   const [contextMenu, setContextMenu] = useState<{
     x: number
     y: number
@@ -118,12 +109,50 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     [] as Array<Edge>,
   )
   const { screenToFlowPosition, getNode } = useReactFlow()
+  const activeTextEditorRef = useRef<ActiveTextEditorState | null>(null)
+  const textEditorBridgeRef = useRef<AgentTextEditorBridge | null>(null)
 
   // Stable refs for accessing current nodes/edges in callbacks without adding them as deps
   const nodesRef = useRef(nodes)
   const edgesRef = useRef(edges)
   nodesRef.current = nodes
   edgesRef.current = edges
+
+  const activeTextWorkspaceNode = useMemo(() => {
+    if (!activeTextWorkspaceNodeId) return null
+
+    const node = nodes.find(
+      (candidate) => candidate.id === activeTextWorkspaceNodeId,
+    )
+    if (!node) return null
+
+    const data = node.data as BlockNodeData
+    if (data.contentType !== 'text') return null
+
+    return node as Node<BlockNodeData>
+  }, [activeTextWorkspaceNodeId, nodes])
+
+  useEffect(() => {
+    if (activeTextWorkspaceNodeId && !activeTextWorkspaceNode) {
+      setActiveTextWorkspaceNodeId(null)
+    }
+  }, [activeTextWorkspaceNode, activeTextWorkspaceNodeId])
+
+  useEffect(() => {
+    const hasLegacyHandles = edges.some(
+      (edge) =>
+        !edge.sourceHandle ||
+        !edge.targetHandle ||
+        edge.sourceHandle === 'output' ||
+        edge.targetHandle === 'input',
+    )
+
+    if (!hasLegacyHandles) return
+
+    setEdges((currentEdges) =>
+      normalizeEdgeHandleIds(nodesRef.current, currentEdges),
+    )
+  }, [edges, setEdges])
 
   const { pushSnapshot, initializeHistory, undo, redo, canUndo, canRedo } =
     useCanvasHistory({
@@ -165,9 +194,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
   const allModels = useQuery(api.models.list) ?? []
   const createGeneration = useMutation(api.generations.create)
   const setFalRequestId = useMutation(api.generations.setFalRequestId)
-  const completeTextGeneration = useMutation(
-    api.generations.completeTextGeneration,
-  )
+  const submitTextGeneration = useAction(api.textGeneration.submit)
 
   const agentModels = allModels.map((m) => ({
     falId: m.falId,
@@ -191,6 +218,8 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     nodeIdRef,
     models: agentModels,
     pushSnapshot,
+    activeTextEditorRef,
+    textEditorBridgeRef,
   })
 
   const { saveStatus, initializeBaseline } = useAutoSave({
@@ -223,7 +252,10 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     if (project && !initialLoadRef.current) {
       initialLoadRef.current = true
       const loadedNodes = project.nodes as Array<Node>
-      const loadedEdges = project.edges as Array<Edge>
+      const loadedEdges = normalizeEdgeHandleIds(
+        loadedNodes,
+        project.edges as Array<Edge>,
+      )
       setNodes(loadedNodes)
       setEdges(loadedEdges)
       nodeIdRef.current = computeMaxNodeId(loadedNodes)
@@ -422,7 +454,10 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
   )
 
   const getCenteredViewportPosition = useCallback(
-    (contentType: NodeContentType, nodeSize = NODE_DEFAULTS[contentType]) => {
+    (
+      contentType: NodeContentType,
+      nodeSize: { width: number; height: number } = NODE_DEFAULTS[contentType],
+    ) => {
       if (!reactFlowWrapper.current) return null
 
       const rect = reactFlowWrapper.current.getBoundingClientRect()
@@ -584,59 +619,9 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
               falRequestId: args.falRequestId,
             })
           },
-          submitToOpenRouter: async ({ data, onDelta }) => {
-            const response = await submitToOpenRouter({ data })
-            const res =
-              response instanceof Response
-                ? response
-                : new Response(JSON.stringify(response))
-            if (!res.body) throw new Error('No response body')
-
-            const reader = res.body.getReader()
-            const decoder = new TextDecoder()
-            let buffer = ''
-            let fullText = ''
-            let usage = { inputTokens: 0, outputTokens: 0 }
-
-            for (;;) {
-              const { done, value } = await reader.read()
-              if (done) break
-              buffer += decoder.decode(value, { stream: true })
-              const lines = buffer.split('\n')
-              buffer = lines.pop() || ''
-
-              for (const line of lines) {
-                if (!line.trim()) continue
-                let event: Record<string, unknown>
-                try {
-                  event = JSON.parse(line)
-                } catch {
-                  continue
-                }
-
-                if (event.type === 'text_delta') {
-                  fullText += event.content as string
-                  onDelta(fullText)
-                } else if (event.type === 'done') {
-                  fullText = (event.text as string) || fullText
-                  const u = event.usage as
-                    | { inputTokens: number; outputTokens: number }
-                    | undefined
-                  if (u) usage = u
-                } else if (event.type === 'error') {
-                  throw new Error(event.message as string)
-                }
-              }
-            }
-
-            return { text: fullText, usage }
-          },
-          completeTextGeneration: async (args) => {
-            await completeTextGeneration({
+          submitTextGeneration: async (args) => {
+            await submitTextGeneration({
               generationId: args.generationId as never,
-              resultText: args.resultText,
-              inputTokens: args.inputTokens,
-              outputTokens: args.outputTokens,
             })
           },
         },
@@ -660,7 +645,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       setNodes,
       createGeneration,
       setFalRequestId,
-      completeTextGeneration,
+      submitTextGeneration,
     ],
   )
 
@@ -692,6 +677,10 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
             onAgentSend: (msg) => {
               setShowAgent(true)
               agent.send(msg)
+            },
+            onOpenTextWorkspace: (nodeId) => {
+              setShowAgent(false)
+              setActiveTextWorkspaceNodeId(nodeId)
             },
           }}
         >
@@ -800,7 +789,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
         />
       )}
 
-      {showAgent && (
+      {showAgent && !activeTextWorkspaceNodeId && (
         <AgentPanel
           messages={agent.messages}
           isStreaming={agent.isStreaming}
@@ -818,6 +807,55 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
           onDeleteChat={agent.deleteChat}
         />
       )}
+
+      <TextEditorWorkspace
+        agentPanelProps={{
+          messages: agent.messages,
+          isStreaming: agent.isStreaming,
+          toolStatus: agent.toolStatus,
+          agentModel: agent.agentModel,
+          onModelChange: agent.setAgentModel,
+          onSend: agent.send,
+          onStop: agent.stopStreaming,
+          onClear: agent.clearChat,
+          chats: agent.chats,
+          activeChatId: agent.activeChatId,
+          onNewChat: agent.newChat,
+          onSwitchChat: agent.switchChat,
+          onDeleteChat: agent.deleteChat,
+        }}
+        node={activeTextWorkspaceNode}
+        onClose={() => {
+          activeTextEditorRef.current = null
+          textEditorBridgeRef.current = null
+          setActiveTextWorkspaceNodeId(null)
+        }}
+        onEditorContextChange={(state) => {
+          activeTextEditorRef.current = state
+        }}
+        onRegisterAgentBridge={(bridge) => {
+          textEditorBridgeRef.current = bridge
+        }}
+        saveStatus={saveStatus}
+        onUpdateDocument={(value) => {
+          if (!activeTextWorkspaceNodeId) return
+
+          const patch = getTextNodeDocumentUpdate(value)
+          setNodes((currentNodes) =>
+            currentNodes.map((node) =>
+              node.id === activeTextWorkspaceNodeId
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      ...patch,
+                    },
+                  }
+                : node,
+            ),
+          )
+        }}
+      />
 
       {contextMenu && (
         <ContextMenu

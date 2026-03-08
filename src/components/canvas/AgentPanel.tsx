@@ -59,6 +59,10 @@ const TOOL_ICON_MAP: Partial<Record<string, LucideIcon>> = {
   create_sandbox: Terminal,
   run_coding_agent: Terminal,
   // Search
+  search_text: Search,
+  read_text: FileText,
+  edit_text: FileText,
+  format_text: FileText,
   grep: Search,
   glob: Search,
   ls: Search,
@@ -149,6 +153,23 @@ const TOOL_DISPLAY: Partial<Record<string, ToolLabel>> = {
             : `Ran ${truncCmd(a.command)}`,
   },
   // Search
+  search_text: {
+    pending: (a) => `Searching text for ${a.pattern}`,
+    done: (a) => `Searched text for ${a.pattern}`,
+  },
+  read_text: {
+    pending: (a) =>
+      a.nodeId ? `Reading ${a.nodeId}` : 'Reading open text editor',
+    done: (a) => (a.nodeId ? `Read ${a.nodeId}` : 'Read open text editor'),
+  },
+  edit_text: {
+    pending: (a) => `Editing text with ${a.mode}`,
+    done: (a) => `Edited text with ${a.mode}`,
+  },
+  format_text: {
+    pending: (a) => `Formatting ${a.target || 'text'} as ${a.format}`,
+    done: (a) => `Formatted ${a.target || 'text'} as ${a.format}`,
+  },
   grep: {
     pending: (a) => `Searching ${a.pattern}`,
     done: (a) => `Searched ${a.pattern}`,
@@ -351,6 +372,10 @@ function ActionLine({ action }: { action: AgentAction }) {
       return `Connected ${c.sourceNodeId} → ${c.targetNodeId}`
     },
     update_node: (a) => `Updated ${(a as { nodeId: string }).nodeId}`,
+    edit_text_node: (a) =>
+      `Edited ${(a as { nodeId: string; mode: string }).nodeId} with ${(a as { mode: string }).mode}`,
+    format_text_node: (a) =>
+      `Formatted ${(a as { nodeId: string; target: string; format: string }).nodeId} ${(a as { target: string }).target} as ${(a as { format: string }).format}`,
     delete_nodes: (a) =>
       `Deleted ${(a as { nodeIds: Array<string> }).nodeIds.length} node(s)`,
     clear_canvas: () => 'Cleared canvas',
@@ -666,6 +691,7 @@ interface AgentPanelProps {
   onNewChat: () => void
   onSwitchChat: (chatId: Id<'chats'>) => void
   onDeleteChat: (chatId: Id<'chats'>) => void
+  variant?: 'floating' | 'embedded'
 }
 
 export default function AgentPanel({
@@ -683,6 +709,7 @@ export default function AgentPanel({
   onNewChat,
   onSwitchChat,
   onDeleteChat,
+  variant = 'floating',
 }: AgentPanelProps) {
   const [input, setInput] = useState('')
   const [showModelPicker, setShowModelPicker] = useState(false)
@@ -739,7 +766,13 @@ export default function AgentPanel({
     AGENT_MODELS.find((m) => m.id === agentModel)?.name ?? 'Custom'
 
   return (
-    <div className="absolute left-1/2 top-16 bottom-20 z-20 flex w-[calc(100vw-1.5rem)] max-w-[28rem] -translate-x-1/2 flex-col rounded-[1.75rem] border border-zinc-800 bg-zinc-900 shadow-[0_4px_24px_rgba(0,0,0,0.5)] md:left-auto md:right-4 md:top-4 md:bottom-4 md:w-96 md:max-w-none md:translate-x-0 md:rounded-2xl">
+    <div
+      className={
+        variant === 'embedded'
+          ? 'relative flex h-full min-h-0 w-full flex-col bg-zinc-900'
+          : 'absolute left-1/2 top-16 bottom-20 z-20 flex w-[calc(100vw-1.5rem)] max-w-[28rem] -translate-x-1/2 flex-col rounded-[1.75rem] border border-zinc-800 bg-zinc-900 shadow-[0_4px_24px_rgba(0,0,0,0.5)] md:left-auto md:right-4 md:top-4 md:bottom-4 md:w-96 md:max-w-none md:translate-x-0 md:rounded-2xl'
+      }
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
         <div className="flex items-center gap-2">
@@ -828,6 +861,11 @@ export default function AgentPanel({
         />
       ) : (
         <>
+          {toolStatus && (
+            <div className="border-b border-zinc-800 px-4 py-2 text-[11px] text-zinc-500">
+              {toolStatus}
+            </div>
+          )}
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {messages.length === 0 && (

@@ -7,8 +7,10 @@ import { api } from '../../convex/_generated/api'
 import type { Edge, Node } from '@xyflow/react'
 import type { Id } from '../../convex/_generated/dataModel'
 import type {
+  ActiveTextEditorState,
   AgentAction,
   AgentChatInput,
+  AgentTextEditorBridge,
   AvailableModel,
   CanvasEdge,
   CanvasNode,
@@ -21,6 +23,13 @@ import type { BlockNodeData } from '@/types/nodes'
 import { DEFAULT_AGENT_MODEL } from '@/config/agentModels'
 import { NODE_DEFAULTS, PORT_TYPE_COLORS } from '@/types/nodes'
 import { createAgentStreamAccumulator } from '@/utils/agentStreamAccumulator'
+import {
+  getNodeReadableText,
+  getTextNodeDocument,
+  getTextNodeDocumentUpdate,
+  replaceNodeDocumentText,
+} from '@/utils/nodeTextUtils'
+import { getFormattedTextNodeUpdate } from '@/utils/textDocumentFormatting'
 import { generateResearchPdf } from '@/utils/pdfGeneration'
 import {
   cancelStream,
@@ -36,7 +45,9 @@ type UseAgentChatOptions = {
   setEdges: React.Dispatch<React.SetStateAction<Array<Edge>>>
   nodeIdRef: React.RefObject<number>
   models: Array<AvailableModel>
-  pushSnapshot?: (nodes: Node[], edges: Edge[]) => void
+  pushSnapshot?: (nodes: Array<Node>, edges: Array<Edge>) => void
+  activeTextEditorRef?: React.RefObject<ActiveTextEditorState | null>
+  textEditorBridgeRef?: React.RefObject<AgentTextEditorBridge | null>
 }
 
 export function useAgentChat({
@@ -48,6 +59,8 @@ export function useAgentChat({
   nodeIdRef,
   models,
   pushSnapshot,
+  activeTextEditorRef,
+  textEditorBridgeRef,
 }: UseAgentChatOptions) {
   const [activeChatId, setActiveChatId] = useState<Id<'chats'> | null>(null)
   const [messages, setMessages] = useState<Array<ChatMessage>>([])
@@ -69,7 +82,10 @@ export function useAgentChat({
       streamIdRef.current = streamId
       eventIndexRef.current = eventIndex
       if (streamId) {
-        localStorage.setItem(streamStorageKey, JSON.stringify({ streamId, eventIndex, chatId }))
+        localStorage.setItem(
+          streamStorageKey,
+          JSON.stringify({ streamId, eventIndex, chatId }),
+        )
       } else {
         localStorage.removeItem(streamStorageKey)
       }
@@ -77,11 +93,19 @@ export function useAgentChat({
     [streamStorageKey],
   )
 
-  const getPersistedStream = useCallback((): { streamId: string; eventIndex: number; chatId?: string } | null => {
+  const getPersistedStream = useCallback((): {
+    streamId: string
+    eventIndex: number
+    chatId?: string
+  } | null => {
     try {
       const raw = localStorage.getItem(streamStorageKey)
       if (!raw) return null
-      return JSON.parse(raw) as { streamId: string; eventIndex: number; chatId?: string }
+      return JSON.parse(raw) as {
+        streamId: string
+        eventIndex: number
+        chatId?: string
+      }
     } catch {
       return null
     }
@@ -89,8 +113,8 @@ export function useAgentChat({
 
   const getHttpBase = useCallback(() => {
     const raw =
-      ((import.meta as any).env.VITE_LLM_SERVER_URL as string | undefined)
-      || (window.location.hostname === 'localhost'
+      ((import.meta as any).env.VITE_LLM_SERVER_URL as string | undefined) ||
+      (window.location.hostname === 'localhost'
         ? 'http://localhost:9400'
         : 'https://lm.aylesflow.com')
     return raw.replace(/\/$/, '')
@@ -98,9 +122,9 @@ export function useAgentChat({
 
   const getWsBase = useCallback(() => {
     const raw =
-      ((import.meta as any).env.VITE_LLM_WS_URL as string | undefined)
-      || ((import.meta as any).env.VITE_LLM_SERVER_URL as string | undefined)
-      || (window.location.hostname === 'localhost'
+      ((import.meta as any).env.VITE_LLM_WS_URL as string | undefined) ||
+      ((import.meta as any).env.VITE_LLM_SERVER_URL as string | undefined) ||
+      (window.location.hostname === 'localhost'
         ? 'ws://localhost:9400'
         : 'wss://lm.aylesflow.com')
     const wsBase = raw.startsWith('ws') ? raw : raw.replace(/^http/i, 'ws')
@@ -285,9 +309,84 @@ export function useAgentChat({
             nds.map((n) => {
               if (n.id !== action.nodeId) return n
               const data = { ...n.data } as BlockNodeData
-              if (action.prompt !== undefined) data.prompt = action.prompt
+              const isEditableTextDocument =
+                data.contentType === 'text' &&
+                (data.generationStatus === 'completed' ||
+                  data.resultText !== undefined)
+              if (action.document !== undefined && isEditableTextDocument) {
+                Object.assign(data, getTextNodeDocumentUpdate(action.document))
+              }
+              if (
+                action.findText !== undefined &&
+                action.replaceText !== undefined &&
+                isEditableTextDocument
+              ) {
+                const nextDocument = replaceNodeDocumentText(
+                  getTextNodeDocument(data),
+                  action.findText,
+                  action.replaceText,
+                  action.replaceAll,
+                )
+                if (nextDocument !== null) {
+                  Object.assign(data, getTextNodeDocumentUpdate(nextDocument))
+                }
+              }
+              if (action.prompt !== undefined) {
+                if (isEditableTextDocument) {
+                  Object.assign(data, getTextNodeDocumentUpdate(action.prompt))
+                } else {
+                  data.prompt = action.prompt
+                }
+              }
               if (action.model !== undefined) data.model = action.model
               if (action.label !== undefined) data.label = action.label
+              return { ...n, data }
+            }),
+          )
+          break
+        }
+
+        case 'edit_text_node': {
+          if (
+            textEditorBridgeRef?.current?.nodeId === action.nodeId &&
+            textEditorBridgeRef.current.applyTextEditAction(action)
+          ) {
+            break
+          }
+          break
+        }
+
+        case 'format_text_node': {
+          if (
+            action.target !== 'text' &&
+            textEditorBridgeRef?.current?.nodeId === action.nodeId &&
+            textEditorBridgeRef.current.applyTextFormatAction(action)
+          ) {
+            break
+          }
+
+          setNodes((nds) =>
+            nds.map((n) => {
+              if (n.id !== action.nodeId) return n
+              const data = { ...n.data } as BlockNodeData
+              if (data.contentType !== 'text') return n
+
+              if (action.target !== 'text' || !action.targetText?.trim()) {
+                return n
+              }
+
+              const nextUpdate = getFormattedTextNodeUpdate(
+                getTextNodeDocument(data),
+                {
+                  format: action.format,
+                  targetText: action.targetText,
+                  level: action.level,
+                  replaceAll: action.replaceAll,
+                },
+              )
+
+              if (!nextUpdate) return n
+              Object.assign(data, nextUpdate)
               return { ...n, data }
             }),
           )
@@ -311,18 +410,24 @@ export function useAgentChat({
         }
       }
     },
-    [setNodes, setEdges, nodeIdRef, pushSnapshot],
+    [setNodes, setEdges, nodeIdRef, pushSnapshot, textEditorBridgeRef],
   )
 
   // Build canvas state snapshot for the server
   const getCanvasState = useCallback(() => {
     const canvasNodes: Array<CanvasNode> = nodesRef.current.map((n) => {
       const d = n.data as BlockNodeData
+      const prompt = getNodeReadableText(d)
+      const document =
+        d.contentType === 'text' ? getTextNodeDocument(d) : undefined
       return {
         id: n.id,
         contentType: d.contentType,
         label: d.label,
-        prompt: d.prompt,
+        prompt,
+        document,
+        documentText:
+          d.contentType === 'text' ? prompt || undefined : undefined,
         model: d.model,
         generationStatus: d.generationStatus,
         resultUrl: d.resultUrl,
@@ -337,7 +442,11 @@ export function useAgentChat({
       sourceHandle: e.sourceHandle ?? undefined,
       targetHandle: e.targetHandle ?? undefined,
     }))
-    return { nodes: canvasNodes, edges: canvasEdges }
+    return {
+      nodes: canvasNodes,
+      edges: canvasEdges,
+      activeTextEditor: activeTextEditorRef?.current ?? null,
+    }
   }, [])
 
   // Create a new chat and switch to it
@@ -380,11 +489,10 @@ export function useAgentChat({
   )
 
   const isFatalStreamEvent = useCallback((event: StreamEvent) => {
-    return event.type === 'error'
-      && (
-        event.message.includes('expired')
-        || event.message.includes('not found')
-      )
+    return (
+      event.type === 'error' &&
+      (event.message.includes('expired') || event.message.includes('not found'))
+    )
   }, [])
 
   const runStreamSession = useCallback(
@@ -487,9 +595,10 @@ export function useAgentChat({
         })
 
         const snapshot = streamAccumulator.snapshot()
-        const hasAssistantPayload = snapshot.content
-          || snapshot.actions.length > 0
-          || snapshot.parts.length > 0
+        const hasAssistantPayload =
+          snapshot.content ||
+          snapshot.actions.length > 0 ||
+          snapshot.parts.length > 0
 
         if (abortRef.current === controller && hasAssistantPayload) {
           await sendMessage({
@@ -542,7 +651,11 @@ export function useAgentChat({
 
   const send = useCallback(
     async (content: string) => {
-      if (!content.trim() || (streamingChatId != null && streamingChatId === activeChatId)) return
+      if (
+        !content.trim() ||
+        (streamingChatId != null && streamingChatId === activeChatId)
+      )
+        return
 
       let chatId = activeChatId
       if (!chatId) {
@@ -571,11 +684,14 @@ export function useAgentChat({
       }
 
       const currentMsgs = messagesRef.current
-      const alreadyHasUserMsg = currentMsgs.length > 0
-        && currentMsgs[currentMsgs.length - 1].role === 'user'
-        && currentMsgs[currentMsgs.length - 1].content === content
+      const alreadyHasUserMsg =
+        currentMsgs.length > 0 &&
+        currentMsgs[currentMsgs.length - 1].role === 'user' &&
+        currentMsgs[currentMsgs.length - 1].content === content
 
-      const historyMessages = (alreadyHasUserMsg ? currentMsgs : [...currentMsgs, userMsg])
+      const historyMessages = (
+        alreadyHasUserMsg ? currentMsgs : [...currentMsgs, userMsg]
+      )
         .slice(-20)
         .map((message) => ({ role: message.role, content: message.content }))
 
@@ -610,7 +726,11 @@ export function useAgentChat({
   )
 
   const resumeStream = useCallback(
-    async (savedStreamId: string, _savedEventIndex: number, savedChatId?: string) => {
+    async (
+      savedStreamId: string,
+      _savedEventIndex: number,
+      savedChatId?: string,
+    ) => {
       if (isResumingRef.current || streamingChatId != null) return
       isResumingRef.current = true
 
@@ -628,7 +748,8 @@ export function useAgentChat({
         return
       }
 
-      const chatId = (savedChatId as Id<'chats'> | undefined) || activeChatIdRef.current
+      const chatId =
+        (savedChatId as Id<'chats'> | undefined) || activeChatIdRef.current
       if (!chatId) {
         isResumingRef.current = false
         return
@@ -669,7 +790,6 @@ export function useAgentChat({
     if (!persisted) return
     console.log('[ws] Found persisted stream on mount:', persisted.streamId)
     resumeStream(persisted.streamId, persisted.eventIndex, persisted.chatId)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const stopStreaming = useCallback(() => {

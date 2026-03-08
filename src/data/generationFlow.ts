@@ -7,11 +7,6 @@ import {
 } from '@/types/nodes'
 import { resolveConnectedInputs } from '@/utils/canvasUtils'
 
-export type TokenUsage = {
-  inputTokens: number
-  outputTokens: number
-}
-
 export type GenerationDeps = {
   getNode: (id: string) => Node | undefined
   edges: Edge[]
@@ -34,15 +29,8 @@ export type GenerationDeps = {
     id: string
     falRequestId: string
   }) => Promise<void>
-  submitToOpenRouter: (args: {
-    data: { model: string; prompt: string }
-    onDelta: (accumulatedText: string) => void
-  }) => Promise<{ text: string; usage: TokenUsage }>
-  completeTextGeneration: (args: {
+  submitTextGeneration: (args: {
     generationId: string
-    resultText: string
-    inputTokens: number
-    outputTokens: number
   }) => Promise<void>
 }
 
@@ -142,28 +130,8 @@ export async function executeGeneration(
     callbacks.onUpdate({ generationId })
 
     if (OPENROUTER_CONTENT_TYPES.includes(blockData.contentType)) {
-      // Text generation via OpenRouter — streaming with token-based billing
-      const { text, usage } = await deps.submitToOpenRouter({
-        data: {
-          model: blockData.model,
-          prompt: effectivePrompt,
-        },
-        onDelta: (accumulatedText) => {
-          callbacks.onUpdate({ resultText: accumulatedText })
-        },
-      })
-
-      await deps.completeTextGeneration({
-        generationId,
-        resultText: text,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-      })
-
-      callbacks.onUpdate({
-        generationStatus: 'completed',
-        resultText: text,
-      })
+      // Text generation — fires Convex action, result comes back reactively
+      await deps.submitTextGeneration({ generationId })
     } else {
       // Media generation via FAL — async with webhook
       const { requestId } = await deps.submitToFal({

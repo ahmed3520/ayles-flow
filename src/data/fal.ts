@@ -30,10 +30,24 @@ const AUDIO_PARAM_OVERRIDES: Partial<Record<string, string>> = {
 // Models that accept image_urls (array) instead of image_url (string)
 const IMAGE_ARRAY_MODELS = new Set([
   'fal-ai/bytedance/seedream/v5/lite/edit',
+  'fal-ai/nano-banana-2/edit',
 ])
 
-export function buildFalInput(data: SubmitInput): Record<string, unknown> {
-  const { contentType, model, prompt, imageUrl, audioUrl, videoUrl } = data
+// Models that switch to a different endpoint when an image is provided
+const IMAGE_EDIT_ROUTES: Record<string, string> = {
+  'fal-ai/nano-banana-2': 'fal-ai/nano-banana-2/edit',
+}
+
+export function buildFalInput(data: SubmitInput): {
+  input: Record<string, unknown>
+  model: string
+} {
+  const { contentType, prompt, imageUrl, audioUrl, videoUrl } = data
+  // Route to edit endpoint when an image is provided
+  const model =
+    imageUrl && IMAGE_EDIT_ROUTES[data.model]
+      ? IMAGE_EDIT_ROUTES[data.model]
+      : data.model
   const input: Record<string, unknown> = {}
 
   // Content-type defaults
@@ -75,7 +89,7 @@ export function buildFalInput(data: SubmitInput): Record<string, unknown> {
     input.video_url = videoUrl
   }
 
-  return input
+  return { input, model }
 }
 
 export const submitToFal = createServerFn({
@@ -99,11 +113,11 @@ export const submitToFal = createServerFn({
       throw new Error('Prompt cannot be empty')
     }
 
-    const input = buildFalInput(data)
+    const { input, model } = buildFalInput(data)
     const webhookUrl = `${convexSiteUrl}/fal/webhook`
 
     const response = await fetch(
-      `https://queue.fal.run/${data.model}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
+      `https://queue.fal.run/${model}?fal_webhook=${encodeURIComponent(webhookUrl)}`,
       {
         method: 'POST',
         headers: {

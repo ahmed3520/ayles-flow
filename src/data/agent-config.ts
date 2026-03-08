@@ -1,6 +1,11 @@
 import type OpenAI from 'openai'
 
-import type { AvailableModel, CanvasEdge, CanvasNode } from '@/types/agent'
+import type {
+  ActiveTextEditorState,
+  AvailableModel,
+  CanvasEdge,
+  CanvasNode,
+} from '@/types/agent'
 
 // --- Tool definitions (OpenAI function calling format) ---
 
@@ -11,8 +16,162 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
     function: {
       name: 'get_canvas_state',
       description:
-        'Get full canvas state: all nodes (with id, type, prompt, model, status, position, and result presence) and all edges. Use this when the runtime snapshot is insufficient.',
+        'Get a canvas summary: node metadata, short text excerpts, edges, and the active text editor state when one is open. Use this for overview, not for reading a full document.',
       parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_text',
+      description:
+        'Search inside text content stored on the canvas. This scans text-node editor documents plus other node text fields and returns matching nodes/lines. Use this to locate exact wording, not to dump an entire document.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: {
+            type: 'string',
+            description: 'Regular expression to search for inside canvas text.',
+          },
+          nodeId: {
+            type: 'string',
+            description: 'Optional: restrict search to one node.',
+          },
+          contentType: {
+            type: 'string',
+            enum: [
+              'text',
+              'note',
+              'ticket',
+              'image',
+              'video',
+              'audio',
+              'music',
+              'pdf',
+              'website',
+            ],
+            description:
+              'Optional: restrict search to one node content type.',
+          },
+          caseInsensitive: {
+            type: 'boolean',
+            description: 'Case-insensitive search.',
+          },
+          maxResults: {
+            type: 'integer',
+            description: 'Maximum number of matches to return. Default 20.',
+          },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_text',
+      description:
+        'Read the full plain-text content of a text node or the currently open text editor. Use this when the user refers to "this text", "this story", "the open editor", or when you need the full document before reviewing or editing it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nodeId: {
+            type: 'string',
+            description:
+              'Optional: specific text node to read. Omit to read the active open text editor.',
+          },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_text',
+      description:
+        'Edit the live Tiptap text editor using the current selection or cursor in the open text workspace. Use this for replacing selected text, inserting near the selection, inserting at the cursor, or deleting the selection.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nodeId: {
+            type: 'string',
+            description:
+              'Optional: target a specific open text node. Omit to use the currently active text editor.',
+          },
+          mode: {
+            type: 'string',
+            enum: [
+              'replace_selection',
+              'insert_before_selection',
+              'insert_after_selection',
+              'insert_at_cursor',
+              'delete_selection',
+            ],
+            description: 'Editing operation to apply in the live editor.',
+          },
+          text: {
+            type: 'string',
+            description:
+              'Text to insert or use as the replacement. Required for every mode except delete_selection.',
+          },
+        },
+        required: ['mode'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'format_text',
+      description:
+        'Apply rich-text formatting inside a text-node document. Use target="selection" or target="current_block" for the live Tiptap editor, or target="text" to format matching content inside a saved text-node document.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nodeId: {
+            type: 'string',
+            description:
+              'Optional for target="selection" or target="current_block" when a text editor is already open. Required for target="text".',
+          },
+          target: {
+            type: 'string',
+            enum: ['selection', 'current_block', 'text'],
+            description:
+              'What to format: the live selection, the current block at the cursor, or matching text in a saved document.',
+          },
+          targetText: {
+            type: 'string',
+            description:
+              'Required when target="text". Exact text or block text to target inside the document.',
+          },
+          format: {
+            type: 'string',
+            enum: [
+              'bold',
+              'italic',
+              'heading',
+              'paragraph',
+              'bullet_list',
+              'ordered_list',
+              'blockquote',
+              'code_block',
+            ],
+            description: 'Formatting operation to apply.',
+          },
+          level: {
+            type: 'integer',
+            enum: [1, 2, 3],
+            description:
+              'Required when format="heading". Heading level to apply.',
+          },
+          replaceAll: {
+            type: 'boolean',
+            description:
+              'Apply formatting to all matches instead of only the first one.',
+          },
+        },
+        required: ['target', 'format'],
+      },
     },
   },
   {
@@ -65,8 +224,17 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
         properties: {
           contentType: {
             type: 'string',
-            enum: ['image', 'video', 'audio', 'music', 'text', 'note', 'website'],
-            description: 'The type of content this node produces. Use "website" for live sandbox preview.',
+            enum: [
+              'image',
+              'video',
+              'audio',
+              'music',
+              'text',
+              'note',
+              'website',
+            ],
+            description:
+              'The type of content this node produces. Use "website" for live sandbox preview.',
           },
           prompt: {
             type: 'string',
@@ -93,7 +261,8 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
           },
           previewUrl: {
             type: 'string',
-            description: 'Live preview URL for website nodes (from create_sandbox result).',
+            description:
+              'Live preview URL for website nodes (from create_sandbox result).',
           },
           sandboxId: {
             type: 'string',
@@ -137,7 +306,7 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
     function: {
       name: 'update_node',
       description:
-        "Update an existing IDLE node's prompt, model, or label. Only use on nodes that have NOT been generated yet (status=idle).",
+        'Update an existing node. Use this for IDLE nodes, or for completed text nodes when you are editing the document content itself. For text documents, prefer `document` for full rewrites or `findText` + `replaceText` for precise in-place edits.',
       parameters: {
         type: 'object',
         properties: {
@@ -145,7 +314,31 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
             type: 'string',
             description: 'ID of the node to update',
           },
-          prompt: { type: 'string', description: 'New prompt text' },
+          prompt: {
+            type: 'string',
+            description:
+              'New prompt text. Legacy fallback: may also be used as full document text for completed text nodes.',
+          },
+          document: {
+            type: 'string',
+            description:
+              'Full replacement content for a completed text-node document.',
+          },
+          findText: {
+            type: 'string',
+            description:
+              'Exact text to find inside a completed text-node document.',
+          },
+          replaceText: {
+            type: 'string',
+            description:
+              'Replacement text for `findText` inside a completed text-node document.',
+          },
+          replaceAll: {
+            type: 'boolean',
+            description:
+              'Replace all occurrences of `findText` instead of only the first one.',
+          },
           model: { type: 'string', description: 'New model falId' },
           label: { type: 'string', description: 'New display label' },
         },
@@ -265,7 +458,8 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
           templateName: {
             type: 'string',
             enum: ['nextjs', 'nextjs-convex'],
-            description: 'nextjs = frontend only (mock data). nextjs-convex = fullstack with real-time DB, auth, file storage.',
+            description:
+              'nextjs = frontend only (mock data). nextjs-convex = fullstack with real-time DB, auth, file storage.',
           },
         },
         required: ['templateName'],
@@ -296,17 +490,30 @@ Instead specify: user stories, data models (fields + types), operations (list, f
           },
           overview: {
             type: 'string',
-            description: 'Brief description of what we are building and its purpose.',
+            description:
+              'Brief description of what we are building and its purpose.',
           },
           tech_stack: {
             type: 'object',
             description: 'Technology choices.',
             properties: {
-              frontend: { type: 'string', description: 'e.g., React 18, Next.js 15' },
-              backend: { type: 'string', description: 'e.g., Convex, Express, None' },
-              database: { type: 'string', description: 'e.g., Convex, PostgreSQL, None (mock data)' },
+              frontend: {
+                type: 'string',
+                description: 'e.g., React 18, Next.js 15',
+              },
+              backend: {
+                type: 'string',
+                description: 'e.g., Convex, Express, None',
+              },
+              database: {
+                type: 'string',
+                description: 'e.g., Convex, PostgreSQL, None (mock data)',
+              },
               auth: { type: 'string', description: 'e.g., Clerk, None' },
-              styling: { type: 'string', description: 'e.g., Tailwind CSS + shadcn/ui' },
+              styling: {
+                type: 'string',
+                description: 'e.g., Tailwind CSS + shadcn/ui',
+              },
             },
           },
           features: {
@@ -315,7 +522,11 @@ Instead specify: user stories, data models (fields + types), operations (list, f
               type: 'object',
               properties: {
                 title: { type: 'string', description: 'Feature title' },
-                user_story: { type: 'string', description: 'As a [user], I want to [action] so that [benefit]' },
+                user_story: {
+                  type: 'string',
+                  description:
+                    'As a [user], I want to [action] so that [benefit]',
+                },
                 acceptance_criteria: {
                   type: 'array',
                   items: { type: 'string' },
@@ -323,20 +534,28 @@ Instead specify: user stories, data models (fields + types), operations (list, f
                 },
               },
             },
-            description: 'List of features as user stories with acceptance criteria.',
+            description:
+              'List of features as user stories with acceptance criteria.',
           },
           data_models: {
             type: 'array',
             items: {
               type: 'object',
               properties: {
-                name: { type: 'string', description: 'Model name (e.g., Product, User, Order)' },
+                name: {
+                  type: 'string',
+                  description: 'Model name (e.g., Product, User, Order)',
+                },
                 fields: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Field definitions (e.g., "id: string", "price: number")',
+                  description:
+                    'Field definitions (e.g., "id: string", "price: number")',
                 },
-                relationships: { type: 'string', description: 'Relationships to other models' },
+                relationships: {
+                  type: 'string',
+                  description: 'Relationships to other models',
+                },
               },
             },
             description: 'Data models/entities and their structure.',
@@ -344,7 +563,8 @@ Instead specify: user stories, data models (fields + types), operations (list, f
           api_operations: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Operations needed (e.g., "List products with optional category filter", "Create new order").',
+            description:
+              'Operations needed (e.g., "List products with optional category filter", "Create new order").',
           },
           design_system: {
             type: 'object',
@@ -367,9 +587,18 @@ Instead specify: user stories, data models (fields + types), operations (list, f
                   body: { type: 'string' },
                 },
               },
-              theme: { type: 'string', description: 'e.g., Dark mode, minimalist, glassmorphism' },
-              border_radius: { type: 'string', description: 'e.g., rounded-lg (8px)' },
-              animations: { type: 'string', description: 'e.g., Subtle micro-animations' },
+              theme: {
+                type: 'string',
+                description: 'e.g., Dark mode, minimalist, glassmorphism',
+              },
+              border_radius: {
+                type: 'string',
+                description: 'e.g., rounded-lg (8px)',
+              },
+              animations: {
+                type: 'string',
+                description: 'e.g., Subtle micro-animations',
+              },
             },
           },
         },
@@ -397,7 +626,8 @@ Instead specify: user stories, data models (fields + types), operations (list, f
           },
           userMessage: {
             type: 'string',
-            description: 'The user request / instructions to pass to the sub-agent.',
+            description:
+              'The user request / instructions to pass to the sub-agent.',
           },
         },
         required: ['sandboxId', 'persona', 'userMessage'],
@@ -449,6 +679,7 @@ Each node is a block with:
 NEVER edit a completed node's prompt to "modify" its output. That would re-generate from scratch and lose the original result.
 Instead, to edit/modify/restyle/vary any existing result: create a NEW node downstream, connect the original's output to the new node's input, and set the new prompt to describe the desired change.
 This is the CORE CONCEPT of the infinite canvas — every modification is a new node in the pipeline, preserving the history of all generations.
+Exception: completed text nodes behave like editable documents. You may use update_node to revise the text content inside an existing completed text node.
 </critical_rule>
 
 <when_to_use_update_node>
@@ -456,8 +687,25 @@ Only use update_node for nodes that are IDLE (not yet generated):
 - Fixing a typo in a prompt before the user generates
 - Changing the model selection before generation
 - Updating a label
-NEVER use update_node on a completed node to "edit" its result. Always create a new downstream node instead.
+Exception: if contentType="text" and the node already contains document text, you MAY use update_node to edit that text directly.
+NEVER use update_node on a completed media node to "edit" its result. Always create a new downstream node instead.
 </when_to_use_update_node>
+
+<text_document_tools>
+Text nodes can contain full editor documents, not just prompts.
+- When a text workspace is open, the runtime snapshot tells you which editor is open plus its current selection text, current block text, and cursor/selection offsets.
+- The runtime snapshot and get_canvas_state are for overview only. They do not replace reading the actual document.
+- When the user refers to "this" open document or asks for feedback on the current editor content, call read_text first.
+- Use search_text to find exact text inside saved text-node documents when you need to search across the canvas.
+- Never use search_text with broad patterns like \`.*\` to dump a whole document. Use read_text instead.
+- Use read_text to fetch the full plain-text content of a text node or the open editor on demand.
+- Use edit_text for live selection-aware or cursor-aware edits in the open Tiptap editor.
+- Use format_text(target="selection" or target="current_block") for live editor formatting changes like bold, headings, lists, quotes, and code blocks.
+- Use format_text(target="text") when you need to format matching text inside a saved text-node document.
+- Use update_node(document="...") to replace the whole document.
+- Use update_node(findText="...", replaceText="...") for precise text edits inside a completed text-node document.
+- If you are editing a text document, operate on the document content, not the node prompt.
+</text_document_tools>
 
 <workflow_patterns>
 
@@ -571,7 +819,7 @@ User has node-1 (completed portrait). User says: "give me 3 style variations"
 4. Node IDs: new nodes get IDs automatically. Only reference existing node IDs from the canvas state.
 5. Explain briefly: tell the user what you're doing and why.
 6. Ask when unclear: if ambiguous, ask before acting.
-7. Editing = new node: when the user wants to modify/edit/restyle/vary a completed result, ALWAYS create a new downstream node with an image-to-image (or appropriate) model and connect it. NEVER just update_node on a completed node.
+7. Editing = new node for completed media outputs: when the user wants to modify/edit/restyle/vary a completed image/video/audio/music/pdf result, ALWAYS create a new downstream node with the appropriate input model and connect it. Exception: completed text nodes can be edited in place with update_node.
 8. Check for results: before connecting a source, verify it has a result (status=completed or has resultUrl). If not, tell the user to generate it first.
 9. Pick image-to-image models for edits: use models with image input (FLUX.2, Ideogram V3, FLUX Kontext, SD 3.5 Medium) when editing existing images.
 10. Use text-to-image models ONLY for fresh generations with no source image.
@@ -711,6 +959,7 @@ export function formatModelsResponse(
 export type VirtualState = {
   nodes: Array<CanvasNode>
   edges: Array<CanvasEdge>
+  activeTextEditor: ActiveTextEditorState | null
   nextNodeId: number
   nextEdgeId: number
   sandboxId: string | null
@@ -720,7 +969,10 @@ export type VirtualState = {
 
 export function formatCanvasStateResponse(state: VirtualState): string {
   if (state.nodes.length === 0) {
-    return 'Canvas is empty — no nodes or edges.'
+    if (!state.activeTextEditor) {
+      return 'Canvas is empty — no nodes or edges.'
+    }
+    return `Canvas is empty — no nodes or edges.\n\nActive text editor:\n- node=${state.activeTextEditor.nodeId} | label="${state.activeTextEditor.label}"`
   }
 
   const nodeLines = state.nodes.map((n) => {
@@ -728,7 +980,11 @@ export function formatCanvasStateResponse(state: VirtualState): string {
     parts.push(`label="${n.label}"`)
     parts.push(`pos=(${n.x}, ${n.y})`)
     if (n.model) parts.push(`model="${n.model}"`)
-    if (n.prompt) parts.push(`prompt="${n.prompt}"`)
+    if (n.contentType === 'text' && n.documentText) {
+      parts.push(`document="${n.documentText}"`)
+    } else if (n.prompt) {
+      parts.push(`prompt="${n.prompt}"`)
+    }
     parts.push(`status=${n.generationStatus}`)
     if (n.resultUrl)
       parts.push('[HAS RESULT - can be connected as input to other nodes]')
@@ -743,12 +999,22 @@ export function formatCanvasStateResponse(state: VirtualState): string {
         )
       : ['(no connections)']
 
-  return `Nodes (${state.nodes.length}):\n${nodeLines.join('\n')}\n\nEdges (${state.edges.length}):\n${edgeLines.join('\n')}`
+  const sections = [
+    `Nodes (${state.nodes.length}):\n${nodeLines.join('\n')}`,
+    `Edges (${state.edges.length}):\n${edgeLines.join('\n')}`,
+  ]
+  if (state.activeTextEditor) {
+    sections.push(
+      `Active text editor:\n- node=${state.activeTextEditor.nodeId} | label="${state.activeTextEditor.label}"`,
+    )
+  }
+  return sections.join('\n\n')
 }
 
 export function initVirtualState(
   nodes: Array<CanvasNode>,
   edges: Array<CanvasEdge>,
+  activeTextEditor: ActiveTextEditorState | null = null,
 ): VirtualState {
   let maxNodeNum = 0
   for (const n of nodes) {
@@ -758,6 +1024,7 @@ export function initVirtualState(
   return {
     nodes: [...nodes],
     edges: [...edges],
+    activeTextEditor,
     nextNodeId: maxNodeNum + 1,
     nextEdgeId: edges.length + 1,
     sandboxId: null,

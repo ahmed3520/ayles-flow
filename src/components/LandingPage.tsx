@@ -2,8 +2,6 @@ import { useClerk } from '@clerk/tanstack-react-start'
 import {
   Background,
   BackgroundVariant,
-  Handle,
-  Position,
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
@@ -11,7 +9,6 @@ import {
 import '@xyflow/react/dist/style.css'
 import {
   ArrowRight,
-  ArrowUp,
   Bot,
   Check,
   FileText,
@@ -25,10 +22,13 @@ import {
   Upload,
   Video,
 } from 'lucide-react'
-import { Fragment, memo, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import type { Edge, Node, NodeProps } from '@xyflow/react'
+import type { Edge, Node } from '@xyflow/react'
+import type { BlockNodeData } from '@/types/nodes'
+import BlockNodeComponent from '@/components/canvas/nodes/BlockNode'
 import Footer from '@/components/Footer'
+import { NODE_DEFAULTS } from '@/types/nodes'
 
 /* ------------------------------------------------------------------ */
 /*  Port colors (from the real app)                                    */
@@ -100,319 +100,303 @@ function useOnScreen<T extends HTMLElement>(threshold = 0.3) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  DemoBlockNode — visual clone of the real BlockNode                 */
-/* ------------------------------------------------------------------ */
-
-type DemoNodeData = {
-  contentType: string
-  label: string
-  model?: string
-  prompt?: string
-  status: 'idle' | 'completed'
-  resultUrl?: string
-  resultGradient?: string
-  outputType: string
-  inputs: Array<{ type: string; label: string }>
-  isAudioResult?: boolean
-}
-
-type DemoBlockNodeType = Node<DemoNodeData, 'demoBlock'>
-
-const ICONS: Record<string, typeof Image> = {
-  note: StickyNote,
-  image: Image,
-  video: Video,
-  music: Music,
-  audio: Mic,
-  text: Type,
-  pdf: FileText,
-}
-
-const DemoBlockNode = memo(({ data }: NodeProps<DemoBlockNodeType>) => {
-  const Icon = ICONS[data.contentType] || Image
-  const isAI = data.contentType !== 'note'
-  const hasResult = data.status === 'completed'
-
-  return (
-    <div className="relative w-[320px] rounded-xl bg-zinc-900 border border-zinc-800/60 shadow-[0_1px_3px_rgba(0,0,0,0.4)] overflow-hidden cursor-grab active:cursor-grabbing">
-      {/* Input handles */}
-      {isAI &&
-        data.inputs.map((inp, i) => {
-          const total = data.inputs.length
-          const yPct = total === 1 ? 50 : ((i + 1) / (total + 1)) * 100
-          return (
-            <Fragment key={`in-${inp.type}-${i}`}>
-              <Handle
-                id={`input-${inp.type}`}
-                type="target"
-                position={Position.Left}
-                style={{
-                  top: `${yPct}%`,
-                  background: PORT_COLORS[inp.type] || '#71717a',
-                  width: 10,
-                  height: 10,
-                  border: '2px solid #27272a',
-                }}
-              />
-              <span
-                className="absolute pointer-events-none text-[9px] whitespace-nowrap"
-                style={{
-                  right: '100%',
-                  marginRight: 8,
-                  top: `${yPct}%`,
-                  transform: 'translateY(-50%)',
-                  color: PORT_COLORS[inp.type] || '#71717a',
-                }}
-              >
-                {inp.label}
-              </span>
-            </Fragment>
-          )
-        })}
-
-      {/* Header */}
-      <div className="px-3 py-1.5 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Icon size={12} className="text-zinc-500" strokeWidth={2} />
-          <span className="text-[10px] font-medium text-zinc-500 tracking-wide uppercase">
-            {data.label}
-          </span>
-        </div>
-        {data.model && (
-          <span className="text-[10px] text-zinc-600 max-w-[140px] truncate">
-            {data.model}
-          </span>
-        )}
-      </div>
-
-      {/* Content */}
-      {isAI ? (
-        <>
-          {data.status === 'idle' && (
-            <div className="h-[180px] flex flex-col items-center justify-center">
-              <Icon size={32} className="text-zinc-700" strokeWidth={1} />
-            </div>
-          )}
-          {hasResult && data.isAudioResult ? (
-            <div
-              className="px-4 py-6 flex items-center justify-center gap-[3px]"
-              style={{ minHeight: 100 }}
-            >
-              {Array.from({ length: 32 }).map((_, i) => {
-                const h = Math.sin(i * 0.5 + 1) * 28 + Math.cos(i * 0.8) * 16 + 22
-                return (
-                  <div
-                    key={i}
-                    className="rounded-full"
-                    style={{
-                      width: 3,
-                      height: h,
-                      backgroundColor: PORT_COLORS.audio,
-                      opacity: 0.5 + Math.sin(i * 0.3) * 0.3,
-                    }}
-                  />
-                )
-              })}
-            </div>
-          ) : hasResult ? (
-            <div
-              className="relative"
-              style={{
-                background: data.resultGradient || '#0a0a15',
-                minHeight: 160,
-              }}
-            >
-              {data.resultUrl && (
-                <img
-                  src={data.resultUrl}
-                  alt={data.label}
-                  className="w-full h-auto block"
-                  loading="eager"
-                />
-              )}
-              {data.contentType === 'video' && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-10 h-10 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center">
-                    <div className="w-0 h-0 border-t-[6px] border-t-transparent border-b-[6px] border-b-transparent border-l-[10px] border-l-white ml-0.5" />
-                  </div>
-                </div>
-              )}
-              {data.contentType === 'pdf' && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900/90">
-                  <FileText size={28} className="text-emerald-400/60 mb-2" />
-                  <span className="text-[11px] text-zinc-400">Research Report.pdf</span>
-                  <span className="text-[9px] text-zinc-600 mt-0.5">12 pages</span>
-                </div>
-              )}
-            </div>
-          ) : null}
-        </>
-      ) : (
-        <div className="px-3 py-2.5 h-[120px]">
-          <p className="text-[12px] text-zinc-400 leading-relaxed">
-            {data.prompt}
-          </p>
-        </div>
-      )}
-
-      {/* Prompt bar — AI idle blocks */}
-      {isAI && data.status === 'idle' && (
-        <div className="px-2.5 pb-2.5 pt-1">
-          <div className="flex items-center gap-1.5 bg-zinc-800/40 rounded-lg px-2.5 py-1.5">
-            <span className="flex-1 text-[11px] text-zinc-600 truncate">
-              {data.prompt || 'Describe what to create...'}
-            </span>
-            <div className="w-5 h-5 rounded-md bg-white flex items-center justify-center shrink-0">
-              <ArrowUp size={12} className="text-zinc-900" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Output handle */}
-      <Handle
-        id={`output-${data.outputType}`}
-        type="source"
-        position={Position.Right}
-        style={{
-          background: PORT_COLORS[data.outputType] || '#71717a',
-          width: 10,
-          height: 10,
-          border: '2px solid #27272a',
-        }}
-      />
-    </div>
-  )
-})
-
-/* ------------------------------------------------------------------ */
 /*  Canvas demo — all completed, professional showcase                 */
 /* ------------------------------------------------------------------ */
 
-const demoNodeTypes = { demoBlock: DemoBlockNode }
+const showcaseNodeTypes = { blockNode: BlockNodeComponent }
 
-const SHOWCASE_NODES: Array<Node<DemoNodeData>> = [
+type ShowcaseScene = {
+  noteColor: NonNullable<BlockNodeData['noteColor']>
+  notePrompt: string
+  ticketPriority: NonNullable<BlockNodeData['ticketPriority']>
+  ticketPrompt: string
+  ticketStatus: NonNullable<BlockNodeData['ticketStatus']>
+  ticketTag: NonNullable<BlockNodeData['ticketTag']>
+  resultLabel: string
+  resultModel: string
+  resultPrompt: string
+  resultUrl: string
+}
+
+const SHOWCASE_SCENES: Array<ShowcaseScene> = [
   {
-    id: 'note-1',
-    type: 'demoBlock',
-    position: { x: 0, y: 140 },
-    data: {
-      contentType: 'note',
-      label: 'Note',
-      prompt:
-        'A cinematic desert highway at golden hour with dramatic storm clouds rolling in. Moody, atmospheric, wide angle.',
-      status: 'completed',
-      outputType: 'text',
-      inputs: [],
-    },
+    noteColor: 'blue',
+    notePrompt:
+      '<p>Misty alpine lake at sunrise with a premium editorial feel.</p><p>Keep the horizon clean and leave negative space for the headline.</p>',
+    ticketPriority: 'high',
+    ticketPrompt:
+      '<p>Ship a polished hero still.</p><ul><li>Cool morning palette</li><li>Crisp reflections</li><li>No people in frame</li></ul>',
+    ticketStatus: 'doing',
+    ticketTag: 'design',
+    resultLabel: 'Hero Still',
+    resultModel: 'FLUX 1.1 Pro Ultra',
+    resultPrompt:
+      'Misty alpine lake at sunrise, mirrored water, premium editorial landscape, clean negative space',
+    resultUrl:
+      'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=360&h=270&q=80',
   },
   {
-    id: 'image-1',
-    type: 'demoBlock',
-    position: { x: 480, y: 0 },
-    data: {
-      contentType: 'image',
-      label: 'Image',
-      model: 'FLUX 1.1 Pro Ultra',
-      status: 'completed',
-      resultUrl: 'https://picsum.photos/seed/quasar-desert/640/400',
-      outputType: 'image',
-      inputs: [{ type: 'text', label: 'Prompt' }],
-    },
+    noteColor: 'pink',
+    notePrompt:
+      '<p>Push warmer light into the scene and bring foreground blossoms closer to camera.</p><p>Keep the frame calm and expensive.</p>',
+    ticketPriority: 'high',
+    ticketPrompt:
+      '<p>Approve the warmer pass for review.</p><ul><li>Brighter focal bloom</li><li>Higher contrast</li><li>Layout-safe crop</li></ul>',
+    ticketStatus: 'done',
+    ticketTag: 'feature',
+    resultLabel: 'Approved Frame',
+    resultModel: 'Imagen 4',
+    resultPrompt:
+      'Warm light over reflective water with blossoms in the foreground, premium editorial nature photography',
+    resultUrl:
+      'https://images.unsplash.com/photo-1490750967868-88aa4486c946?auto=format&fit=crop&w=360&h=270&q=80',
   },
   {
-    id: 'video-1',
-    type: 'demoBlock',
-    position: { x: 480, y: 340 },
-    data: {
-      contentType: 'video',
-      label: 'Video',
-      model: 'Kling Video v2.1',
-      status: 'completed',
-      resultUrl: 'https://picsum.photos/seed/quasar-cinematic/640/400',
-      outputType: 'video',
-      inputs: [
-        { type: 'text', label: 'Prompt' },
-        { type: 'image', label: 'Image' },
-      ],
-    },
-  },
-  {
-    id: 'music-1',
-    type: 'demoBlock',
-    position: { x: 960, y: 60 },
-    data: {
-      contentType: 'music',
-      label: 'Music',
-      model: 'MiniMax Music',
-      status: 'completed',
-      isAudioResult: true,
-      outputType: 'audio',
-      inputs: [{ type: 'text', label: 'Prompt' }],
-    },
-  },
-  {
-    id: 'pdf-1',
-    type: 'demoBlock',
-    position: { x: 960, y: 340 },
-    data: {
-      contentType: 'pdf',
-      label: 'PDF',
-      model: 'Deep Research',
-      status: 'completed',
-      resultUrl: '',
-      outputType: 'pdf',
-      inputs: [{ type: 'text', label: 'Prompt' }],
-    },
+    noteColor: 'purple',
+    notePrompt:
+      '<p>Darken the water, deepen the shadows, and let the subject glow.</p><p>Keep it elegant instead of fantasy.</p>',
+    ticketPriority: 'urgent',
+    ticketPrompt:
+      '<p>Prep the moody variant for social crops.</p><ul><li>Sharper center subject</li><li>Deeper blacks</li><li>Premium finish only</li></ul>',
+    ticketStatus: 'doing',
+    ticketTag: 'design',
+    resultLabel: 'Night Variant',
+    resultModel: 'Recraft Image',
+    resultPrompt:
+      'Moody reflective water at dusk, luminous petals, deep contrast, premium editorial finish',
+    resultUrl:
+      'https://images.unsplash.com/photo-1500375592092-40eb2168fd21?auto=format&fit=crop&w=360&h=270&q=80',
   },
 ]
 
-const SHOWCASE_EDGES: Edge[] = [
+function getShowcaseNodeStyle(
+  contentType: BlockNodeData['contentType'],
+  overrides?: Partial<{ height: number; width: number }>,
+) {
+  const defaults = NODE_DEFAULTS[contentType]
+  return {
+    width: defaults.width,
+    height: defaults.height,
+    ...overrides,
+  }
+}
+
+function createShowcaseNodes(scene: ShowcaseScene): Array<Node<BlockNodeData>> {
+  return [
+    {
+      id: 'note-1',
+      type: 'blockNode',
+      position: { x: 0, y: 78 },
+      style: getShowcaseNodeStyle('note', { width: 300, height: 250 }),
+      data: {
+        contentType: 'note',
+        label: 'Creative Brief',
+        prompt: scene.notePrompt,
+        model: '',
+        generationStatus: 'completed',
+        outputType: 'text',
+        noteColor: scene.noteColor,
+      },
+    },
+    {
+      id: 'ticket-1',
+      type: 'blockNode',
+      position: { x: 10, y: 365 },
+      style: getShowcaseNodeStyle('ticket', { width: 320, height: 220 }),
+      data: {
+        contentType: 'ticket',
+        label: 'Hero Asset',
+        prompt: scene.ticketPrompt,
+        model: '',
+        generationStatus: 'completed',
+        outputType: 'text',
+        ticketStatus: scene.ticketStatus,
+        ticketPriority: scene.ticketPriority,
+        ticketTag: scene.ticketTag,
+      },
+    },
+    {
+      id: 'image-1',
+      type: 'blockNode',
+      position: { x: 370, y: 90 },
+      style: getShowcaseNodeStyle('image', { width: 320, height: 250 }),
+      data: {
+        contentType: 'image',
+        label: 'Image Draft',
+        prompt: scene.resultPrompt,
+        model: scene.resultModel,
+        generationStatus: 'idle',
+        outputType: 'image',
+      },
+    },
+    {
+      id: 'image-2',
+      type: 'blockNode',
+      position: { x: 730, y: 90 },
+      style: getShowcaseNodeStyle('image', { width: 360, height: 270 }),
+      data: {
+        contentType: 'image',
+        label: scene.resultLabel,
+        prompt: scene.resultPrompt,
+        model: scene.resultModel,
+        generationStatus: 'completed',
+        outputType: 'image',
+        resultUrl: scene.resultUrl,
+      },
+    },
+    {
+      id: 'music-1',
+      type: 'blockNode',
+      position: { x: 370, y: 390 },
+      style: getShowcaseNodeStyle('music', { width: 320, height: 170 }),
+      data: {
+        contentType: 'music',
+        label: 'Music Bed',
+        prompt: 'Warm ambient score with patient build and soft motion',
+        model: 'MiniMax Music',
+        generationStatus: 'completed',
+        outputType: 'audio',
+        resultUrl: 'https://samplelib.com/lib/preview/mp3/sample-6s.mp3',
+      },
+    },
+    {
+      id: 'audio-1',
+      type: 'blockNode',
+      position: { x: 730, y: 390 },
+      style: getShowcaseNodeStyle('audio', { width: 320, height: 170 }),
+      data: {
+        contentType: 'audio',
+        label: 'Voiceover',
+        prompt: 'Measured product intro with calm, premium pacing',
+        model: 'ElevenLabs',
+        generationStatus: 'completed',
+        outputType: 'audio',
+        resultUrl: 'https://samplelib.com/lib/preview/mp3/sample-3s.mp3',
+      },
+    },
+  ]
+}
+
+const SHOWCASE_NODES = createShowcaseNodes(SHOWCASE_SCENES[0])
+
+const SHOWCASE_EDGES: Array<Edge> = [
   {
-    id: 'e-note-image',
+    id: 'e-note-image-draft',
     source: 'note-1',
     target: 'image-1',
     sourceHandle: 'output-text',
     targetHandle: 'input-text',
     style: { stroke: PORT_COLORS.text, strokeWidth: 2 },
-  },
-  {
-    id: 'e-note-video',
-    source: 'note-1',
-    target: 'video-1',
-    sourceHandle: 'output-text',
-    targetHandle: 'input-text',
-    style: { stroke: PORT_COLORS.text, strokeWidth: 2 },
-  },
-  {
-    id: 'e-image-video',
-    source: 'image-1',
-    target: 'video-1',
-    sourceHandle: 'output-image',
-    targetHandle: 'input-image',
-    style: { stroke: PORT_COLORS.image, strokeWidth: 2 },
     animated: true,
-  },
-  {
-    id: 'e-note-music',
-    source: 'note-1',
-    target: 'music-1',
-    sourceHandle: 'output-text',
-    targetHandle: 'input-text',
-    style: { stroke: PORT_COLORS.text, strokeWidth: 2 },
-  },
-  {
-    id: 'e-note-pdf',
-    source: 'note-1',
-    target: 'pdf-1',
-    sourceHandle: 'output-text',
-    targetHandle: 'input-text',
-    style: { stroke: PORT_COLORS.text, strokeWidth: 2 },
   },
 ]
 
 function HeroCanvasInner() {
-  const [nodes, , onNodesChange] = useNodesState(SHOWCASE_NODES)
+  const [mounted, setMounted] = useState(false)
+  const [nodes, setNodes, onNodesChange] =
+    useNodesState<Node<BlockNodeData>>(SHOWCASE_NODES)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+
+    let sceneIndex = 0
+    const timeouts = new Set<number>()
+
+    const intervalId = window.setInterval(() => {
+      const nextIndex = (sceneIndex + 1) % SHOWCASE_SCENES.length
+      const nextScene = SHOWCASE_SCENES[nextIndex]
+
+      setNodes((currentNodes) =>
+        currentNodes.map((node) =>
+          node.id === 'image-1'
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  model: nextScene.resultModel,
+                  generationStatus: 'generating',
+                },
+              }
+            : node,
+        ),
+      )
+
+      const timeoutId = window.setTimeout(() => {
+        sceneIndex = nextIndex
+        setNodes((currentNodes) =>
+          currentNodes.map((node) => {
+            if (node.id === 'note-1') {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  prompt: nextScene.notePrompt,
+                  noteColor: nextScene.noteColor,
+                },
+              }
+            }
+
+            if (node.id === 'ticket-1') {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  prompt: nextScene.ticketPrompt,
+                  ticketPriority: nextScene.ticketPriority,
+                  ticketStatus: nextScene.ticketStatus,
+                  ticketTag: nextScene.ticketTag,
+                },
+              }
+            }
+
+            if (node.id === 'image-1') {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  label: 'Image Draft',
+                  model: nextScene.resultModel,
+                  prompt: nextScene.resultPrompt,
+                  generationStatus: 'idle',
+                },
+              }
+            }
+
+            if (node.id === 'image-2') {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  label: nextScene.resultLabel,
+                  model: nextScene.resultModel,
+                  prompt: nextScene.resultPrompt,
+                  resultUrl: nextScene.resultUrl,
+                },
+              }
+            }
+
+            return node
+          }),
+        )
+        timeouts.delete(timeoutId)
+      }, 1400)
+
+      timeouts.add(timeoutId)
+    }, 5200)
+
+    return () => {
+      window.clearInterval(intervalId)
+      timeouts.forEach((timeoutId) => window.clearTimeout(timeoutId))
+    }
+  }, [mounted, setNodes])
+
+  if (!mounted) {
+    return <div style={{ height: 620, backgroundColor: '#09090b' }} />
+  }
 
   return (
     <div style={{ height: 620, backgroundColor: '#09090b' }}>
@@ -420,10 +404,10 @@ function HeroCanvasInner() {
         nodes={nodes}
         edges={SHOWCASE_EDGES}
         onNodesChange={onNodesChange}
-        nodeTypes={demoNodeTypes}
+        nodeTypes={showcaseNodeTypes}
         colorMode="dark"
         fitView
-        fitViewOptions={{ padding: 0.15, maxZoom: 0.85 }}
+        fitViewOptions={{ padding: 0.06, maxZoom: 1 }}
         nodesDraggable
         panOnDrag
         panOnScroll={false}
@@ -438,7 +422,7 @@ function HeroCanvasInner() {
       >
         <Background
           variant={BackgroundVariant.Cross}
-          gap={40}
+          gap={36}
           size={1}
           color="#52525b"
           style={{ backgroundColor: '#09090b' }}
@@ -475,8 +459,7 @@ type AgentLine = {
 }
 
 const AGENT_CONVERSATION: Array<
-  | { role: 'user'; text: string }
-  | { role: 'agent'; lines: AgentLine[] }
+  { role: 'user'; text: string } | { role: 'agent'; lines: Array<AgentLine> }
 > = [
   {
     role: 'user',
@@ -496,7 +479,7 @@ const AGENT_CONVERSATION: Array<
       { text: 'Connected Note → Image → Video', isAction: true },
       { text: 'Connected Note → Music', isAction: true },
       {
-        text: 'Done. I\'ve created a research report and wired up your full pipeline. Hit generate to run everything.',
+        text: "Done. I've created a research report and wired up your full pipeline. Hit generate to run everything.",
       },
     ],
   },
@@ -507,7 +490,12 @@ function AgentShowcase() {
   const [visibleCount, setVisibleCount] = useState(0)
   const messagesRef = useRef<HTMLDivElement>(null)
 
-  const allLines: Array<{ role: string; text: string; isAction?: boolean; isTool?: boolean }> = []
+  const allLines: Array<{
+    role: string
+    text: string
+    isAction?: boolean
+    isTool?: boolean
+  }> = []
   for (const msg of AGENT_CONVERSATION) {
     if (msg.role === 'user') {
       allLines.push({ role: 'user', text: msg.text })
@@ -535,7 +523,10 @@ function AgentShowcase() {
   // Auto-scroll to bottom as new messages appear
   useEffect(() => {
     if (messagesRef.current) {
-      messagesRef.current.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' })
+      messagesRef.current.scrollTo({
+        top: messagesRef.current.scrollHeight,
+        behavior: 'smooth',
+      })
     }
   }, [visibleCount])
 
@@ -553,7 +544,10 @@ function AgentShowcase() {
               </span>
             </div>
             {/* Messages */}
-            <div ref={messagesRef} className="p-4 space-y-3 h-[380px] overflow-y-auto dark-scrollbar">
+            <div
+              ref={messagesRef}
+              className="p-4 space-y-3 h-[380px] overflow-y-auto dark-scrollbar"
+            >
               {allLines.slice(0, visibleCount).map((line, i) => {
                 if (line.role === 'user') {
                   return (
@@ -635,9 +629,9 @@ function AgentShowcase() {
               <span className="text-zinc-500">The agent builds it.</span>
             </h2>
             <p className="mt-5 text-[16px] leading-relaxed text-zinc-500 max-w-md">
-              Tell the agent what you need in plain language. It researches the web,
-              picks the right models, creates nodes, wires connections, generates
-              PDFs, and runs everything — hands-free.
+              Tell the agent what you need in plain language. It researches the
+              web, picks the right models, creates nodes, wires connections,
+              generates PDFs, and runs everything — hands-free.
             </p>
             <ul className="mt-6 space-y-3">
               {[
@@ -682,10 +676,7 @@ function Navbar({ onSignIn }: { onSignIn: () => void }) {
       className={`fixed inset-x-0 top-0 z-50 border-b backdrop-blur-2xl transition-[background-color,border-color] duration-500 ${scrolled ? 'bg-[#09090b]/80 border-zinc-800/40' : 'bg-transparent border-transparent'}`}
     >
       <div className="mx-auto flex h-14 max-w-[1120px] items-center justify-between px-6">
-        <a
-          href="#"
-          className="font-logo text-[22px] text-white"
-        >
+        <a href="#" className="font-logo text-[22px] text-white">
           Ayles Flow
         </a>
 
@@ -733,8 +724,8 @@ function Hero({ onSignIn }: { onSignIn: () => void }) {
         </h1>
 
         <p className="mx-auto mt-6 max-w-lg text-[17px] leading-relaxed text-zinc-500">
-          Design, deploy, and scale AI workflows on one infinite canvas.
-          Use any model. Let agents build the pipeline.
+          Design, deploy, and scale AI workflows on one infinite canvas. Use any
+          model. Let agents build the pipeline.
         </p>
 
         <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
@@ -766,42 +757,46 @@ function Hero({ onSignIn }: { onSignIn: () => void }) {
 
 function QuasarLogo({ size = 20 }: { size?: number }) {
   return (
-   <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width={size}
-    height={size}
-    viewBox="0 0 512 512"
-    fill="none"
-  >
-    <rect width={512} height={512} rx={8} fill="#F43E01" />
-    <g transform="scale(2.0) translate(-128, -128)">
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M251.3 156.4C251.1 155.5 249.8 155.4 249.7 156.3L248.3 171.8C244.8 211.2 212.0 241.6 167.0 247.9C166.1 248.0 166.2 249.5 167.1 249.7C213.4 260.3 249.9 293.8 258.1 333.4L261.3 349.2C261.5 350.1 262.8 350.2 262.9 349.3L264.3 333.8C267.8 294.4 300.6 264.0 345.6 257.7C346.5 257.6 346.4 256.1 345.5 255.9C299.2 245.3 262.7 211.8 254.5 172.2L251.3 156.4ZM244.4 171.2L247.4 138.0C247.4 137.6 247.7 137.3 248.1 137.3L250.6 137.4C251.0 137.4 251.4 137.7 251.5 138.1L258.4 171.7C266.6 211.5 304.5 244.9 351.6 253.6L362.6 255.6C363.0 255.7 363.3 256.1 363.3 256.5L363.4 258.3C363.4 258.7 363.2 259.0 362.8 259.1L351.8 260.1C305.7 264.3 271.4 294.3 267.9 333.7L264.9 366.9C264.8 367.3 264.5 367.6 264.1 367.6L261.6 367.5C261.2 367.5 260.8 367.2 260.7 366.8L253.8 333.2C245.6 293.4 207.7 260.0 160.6 251.3L149.6 249.3C149.2 249.2 148.9 248.8 148.9 248.4L148.8 246.6C148.8 246.2 149.0 245.9 149.4 245.8L160.4 244.8C206.5 240.6 240.8 210.6 244.4 171.2Z"
-        fill="white"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M206.8 315.6C226.5 305.8 250.9 289.6 275.1 269.2C299.3 248.8 318.7 228.5 330.4 211.9C336.3 203.6 340.2 196.4 341.8 190.8C342.7 188.0 342.9 185.7 342.7 184.0C342.5 182.3 341.9 181.4 341.3 180.8C340.6 180.3 339.5 179.8 337.5 179.6C335.5 179.4 332.8 179.6 329.5 180.3C322.8 181.7 314.3 184.9 304.3 189.8C284.6 199.6 261.2 215.8 237.0 236.2C212.8 256.6 193.4 277.0 181.7 293.6C175.8 301.9 171.9 309.1 170.3 314.7C169.4 317.5 169.2 319.8 169.4 321.5C169.6 323.2 170.2 324.1 170.8 324.7C171.5 325.2 172.6 325.7 174.6 325.9C176.6 326.1 179.3 325.9 182.6 325.2C189.3 323.8 197.8 320.6 206.8 315.6ZM167.6 326.7C180.0 337.2 229.5 312.5 278.2 271.5C326.9 230.5 356.4 189.0 344.0 178.5C331.6 168.0 282.1 192.7 233.4 233.7C184.7 274.7 155.2 316.2 167.6 326.7Z"
-        fill="white"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M175.8 204.5C189.5 222.3 211.4 244.7 238.1 267.5C264.8 290.3 291.2 308.9 312.2 320.6C322.7 326.5 331.7 330.5 338.5 332.5C341.9 333.5 344.6 333.9 346.6 333.9C348.6 333.9 349.6 333.5 350.2 332.9C350.8 332.4 351.3 331.5 351.3 329.9C351.3 328.2 350.8 325.9 349.6 323.0C347.3 317.2 342.6 309.6 335.7 300.8C322.0 283.0 300.1 260.6 273.4 237.8C246.7 215.0 220.3 196.4 199.3 184.7C188.8 178.8 179.8 174.8 173.0 172.8C169.6 171.8 166.9 171.4 164.9 171.4C162.9 171.4 161.9 171.8 161.3 172.4C160.7 172.9 160.2 173.8 160.2 175.4C160.2 177.1 160.7 179.4 161.9 182.3C164.2 188.1 168.9 195.7 175.8 204.5ZM158.4 169.5C147.3 178.8 181.8 223.4 236.6 269.2C291.4 315.0 344.1 344.5 355.2 335.2C366.3 325.9 331.8 281.3 277.0 235.5C222.2 189.7 169.5 160.2 158.4 169.5Z"
-        fill="white"
-      />
-    </g>
-  </svg>
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 512 512"
+      fill="none"
+    >
+      <rect width={512} height={512} rx={8} fill="#F43E01" />
+      <g transform="scale(2.0) translate(-128, -128)">
+        <path
+          fillRule="evenodd"
+          clipRule="evenodd"
+          d="M251.3 156.4C251.1 155.5 249.8 155.4 249.7 156.3L248.3 171.8C244.8 211.2 212.0 241.6 167.0 247.9C166.1 248.0 166.2 249.5 167.1 249.7C213.4 260.3 249.9 293.8 258.1 333.4L261.3 349.2C261.5 350.1 262.8 350.2 262.9 349.3L264.3 333.8C267.8 294.4 300.6 264.0 345.6 257.7C346.5 257.6 346.4 256.1 345.5 255.9C299.2 245.3 262.7 211.8 254.5 172.2L251.3 156.4ZM244.4 171.2L247.4 138.0C247.4 137.6 247.7 137.3 248.1 137.3L250.6 137.4C251.0 137.4 251.4 137.7 251.5 138.1L258.4 171.7C266.6 211.5 304.5 244.9 351.6 253.6L362.6 255.6C363.0 255.7 363.3 256.1 363.3 256.5L363.4 258.3C363.4 258.7 363.2 259.0 362.8 259.1L351.8 260.1C305.7 264.3 271.4 294.3 267.9 333.7L264.9 366.9C264.8 367.3 264.5 367.6 264.1 367.6L261.6 367.5C261.2 367.5 260.8 367.2 260.7 366.8L253.8 333.2C245.6 293.4 207.7 260.0 160.6 251.3L149.6 249.3C149.2 249.2 148.9 248.8 148.9 248.4L148.8 246.6C148.8 246.2 149.0 245.9 149.4 245.8L160.4 244.8C206.5 240.6 240.8 210.6 244.4 171.2Z"
+          fill="white"
+        />
+        <path
+          fillRule="evenodd"
+          clipRule="evenodd"
+          d="M206.8 315.6C226.5 305.8 250.9 289.6 275.1 269.2C299.3 248.8 318.7 228.5 330.4 211.9C336.3 203.6 340.2 196.4 341.8 190.8C342.7 188.0 342.9 185.7 342.7 184.0C342.5 182.3 341.9 181.4 341.3 180.8C340.6 180.3 339.5 179.8 337.5 179.6C335.5 179.4 332.8 179.6 329.5 180.3C322.8 181.7 314.3 184.9 304.3 189.8C284.6 199.6 261.2 215.8 237.0 236.2C212.8 256.6 193.4 277.0 181.7 293.6C175.8 301.9 171.9 309.1 170.3 314.7C169.4 317.5 169.2 319.8 169.4 321.5C169.6 323.2 170.2 324.1 170.8 324.7C171.5 325.2 172.6 325.7 174.6 325.9C176.6 326.1 179.3 325.9 182.6 325.2C189.3 323.8 197.8 320.6 206.8 315.6ZM167.6 326.7C180.0 337.2 229.5 312.5 278.2 271.5C326.9 230.5 356.4 189.0 344.0 178.5C331.6 168.0 282.1 192.7 233.4 233.7C184.7 274.7 155.2 316.2 167.6 326.7Z"
+          fill="white"
+        />
+        <path
+          fillRule="evenodd"
+          clipRule="evenodd"
+          d="M175.8 204.5C189.5 222.3 211.4 244.7 238.1 267.5C264.8 290.3 291.2 308.9 312.2 320.6C322.7 326.5 331.7 330.5 338.5 332.5C341.9 333.5 344.6 333.9 346.6 333.9C348.6 333.9 349.6 333.5 350.2 332.9C350.8 332.4 351.3 331.5 351.3 329.9C351.3 328.2 350.8 325.9 349.6 323.0C347.3 317.2 342.6 309.6 335.7 300.8C322.0 283.0 300.1 260.6 273.4 237.8C246.7 215.0 220.3 196.4 199.3 184.7C188.8 178.8 179.8 174.8 173.0 172.8C169.6 171.8 166.9 171.4 164.9 171.4C162.9 171.4 161.9 171.8 161.3 172.4C160.7 172.9 160.2 173.8 160.2 175.4C160.2 177.1 160.7 179.4 161.9 182.3C164.2 188.1 168.9 195.7 175.8 204.5ZM158.4 169.5C147.3 178.8 181.8 223.4 236.6 269.2C291.4 315.0 344.1 344.5 355.2 335.2C366.3 325.9 331.8 281.3 277.0 235.5C222.2 189.7 169.5 160.2 158.4 169.5Z"
+          fill="white"
+        />
+      </g>
+    </svg>
   )
 }
 
 function AnthropicLogo({ size = 20 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 512 512" fill="none">
-      <path fillRule="nonzero" d="M318.663 149.787h-43.368l78.952 212.423 43.368.004-78.952-212.427zm-125.326 0l-78.952 212.427h44.255l15.932-44.608 82.846-.004 16.107 44.612h44.255l-79.126-212.427h-45.317zm-4.251 128.341l26.91-74.701 27.083 74.701h-53.993z" fill="currentColor"/>
+      <path
+        fillRule="nonzero"
+        d="M318.663 149.787h-43.368l78.952 212.423 43.368.004-78.952-212.427zm-125.326 0l-78.952 212.427h44.255l15.932-44.608 82.846-.004 16.107 44.612h44.255l-79.126-212.427h-45.317zm-4.251 128.341l26.91-74.701 27.083 74.701h-53.993z"
+        fill="currentColor"
+      />
     </svg>
   )
 }
@@ -817,48 +812,63 @@ function OpenAILogo({ size = 20 }: { size?: number }) {
 function GoogleLogo({ size = 20 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
-      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 0 0 1 12c0 1.77.42 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05" />
-      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+      <path
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+        fill="#4285F4"
+      />
+      <path
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+        fill="#34A853"
+      />
+      <path
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 0 0 1 12c0 1.77.42 3.45 1.18 4.93l3.66-2.84z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+        fill="#EA4335"
+      />
     </svg>
   )
 }
 
 function BFLLogo({ size = 20 }: { size?: number }) {
   return (
-   <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width={size}
-    height={size}
-    viewBox="0 0 197 140"
-    fill="none"
-  >
-    <g clipPath="url(#clip0_24_990)">
-      <path
-        d="M140.651 59.8389H119.806L98.9601 30.4717L33.9327 121.982H54.8224L98.9591 59.8408H119.805L75.6681 121.982H96.6163L140.651 59.8389L196.895 139.025H181.162V139.026H163.987V122.049L140.651 89.2061L117.445 121.986V139.025H63.5626L63.5616 139.027H42.7159L42.7169 139.025H0.894653L98.9601 0.973633L140.651 59.8389Z"
-        fill="white"
-      />
-    </g>
-    <defs>
-      <clipPath id="clip0_24_990">
-        <rect
-          width={196}
-          height={140}
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 197 140"
+      fill="none"
+    >
+      <g clipPath="url(#clip0_24_990)">
+        <path
+          d="M140.651 59.8389H119.806L98.9601 30.4717L33.9327 121.982H54.8224L98.9591 59.8408H119.805L75.6681 121.982H96.6163L140.651 59.8389L196.895 139.025H181.162V139.026H163.987V122.049L140.651 89.2061L117.445 121.986V139.025H63.5626L63.5616 139.027H42.7159L42.7169 139.025H0.894653L98.9601 0.973633L140.651 59.8389Z"
           fill="white"
-          transform="translate(0.894775)"
         />
-      </clipPath>
-    </defs>
-  </svg>
-
-
+      </g>
+      <defs>
+        <clipPath id="clip0_24_990">
+          <rect
+            width={196}
+            height={140}
+            fill="white"
+            transform="translate(0.894775)"
+          />
+        </clipPath>
+      </defs>
+    </svg>
   )
 }
 
 function KlingLogo({ size = 20 }: { size?: number }) {
   return (
-    <span style={{ fontSize: size, fontWeight: 700, lineHeight: 1 }} className="text-current">K</span>
+    <span
+      style={{ fontSize: size, fontWeight: 700, lineHeight: 1 }}
+      className="text-current"
+    >
+      K
+    </span>
   )
 }
 
@@ -921,7 +931,6 @@ function Providers() {
     </div>
   )
 }
-
 
 /* ------------------------------------------------------------------ */
 /*  Steps — 01 Create · 02 Connect · 03 Generate                      */
@@ -1008,28 +1017,159 @@ function Steps() {
                 viewBox="0 0 400 300"
                 className="absolute inset-0 w-full h-full"
               >
-                <path d="M 100 130 C 130 130, 135 70, 160 70" fill="none" stroke={PORT_COLORS.text} strokeWidth="2" opacity="0.4" />
-                <path d="M 240 70 C 270 70, 270 150, 300 150" fill="none" stroke={PORT_COLORS.image} strokeWidth="2" opacity="0.4" />
-                <path d="M 100 130 C 140 130, 140 220, 160 220" fill="none" stroke={PORT_COLORS.text} strokeWidth="2" opacity="0.4" />
+                <path
+                  d="M 100 130 C 130 130, 135 70, 160 70"
+                  fill="none"
+                  stroke={PORT_COLORS.text}
+                  strokeWidth="2"
+                  opacity="0.4"
+                />
+                <path
+                  d="M 240 70 C 270 70, 270 150, 300 150"
+                  fill="none"
+                  stroke={PORT_COLORS.image}
+                  strokeWidth="2"
+                  opacity="0.4"
+                />
+                <path
+                  d="M 100 130 C 140 130, 140 220, 160 220"
+                  fill="none"
+                  stroke={PORT_COLORS.text}
+                  strokeWidth="2"
+                  opacity="0.4"
+                />
                 {/* Note */}
-                <rect x="20" y="115" width="80" height="30" rx="6" fill="#18181b" stroke="#27272a" />
-                <circle cx="100" cy="130" r="4" fill={PORT_COLORS.text} stroke="#27272a" strokeWidth="1.5" />
-                <text x="55" y="134" textAnchor="middle" fill="#71717a" fontSize="10">Note</text>
+                <rect
+                  x="20"
+                  y="115"
+                  width="80"
+                  height="30"
+                  rx="6"
+                  fill="#18181b"
+                  stroke="#27272a"
+                />
+                <circle
+                  cx="100"
+                  cy="130"
+                  r="4"
+                  fill={PORT_COLORS.text}
+                  stroke="#27272a"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="55"
+                  y="134"
+                  textAnchor="middle"
+                  fill="#71717a"
+                  fontSize="10"
+                >
+                  Note
+                </text>
                 {/* Image */}
-                <rect x="160" y="55" width="80" height="30" rx="6" fill="#18181b" stroke="#27272a" />
-                <circle cx="160" cy="70" r="4" fill={PORT_COLORS.text} stroke="#27272a" strokeWidth="1.5" />
-                <circle cx="240" cy="70" r="4" fill={PORT_COLORS.image} stroke="#27272a" strokeWidth="1.5" />
-                <text x="200" y="74" textAnchor="middle" fill="#71717a" fontSize="10">Image</text>
+                <rect
+                  x="160"
+                  y="55"
+                  width="80"
+                  height="30"
+                  rx="6"
+                  fill="#18181b"
+                  stroke="#27272a"
+                />
+                <circle
+                  cx="160"
+                  cy="70"
+                  r="4"
+                  fill={PORT_COLORS.text}
+                  stroke="#27272a"
+                  strokeWidth="1.5"
+                />
+                <circle
+                  cx="240"
+                  cy="70"
+                  r="4"
+                  fill={PORT_COLORS.image}
+                  stroke="#27272a"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="200"
+                  y="74"
+                  textAnchor="middle"
+                  fill="#71717a"
+                  fontSize="10"
+                >
+                  Image
+                </text>
                 {/* Video */}
-                <rect x="160" y="205" width="80" height="30" rx="6" fill="#18181b" stroke="#27272a" />
-                <circle cx="160" cy="220" r="4" fill={PORT_COLORS.text} stroke="#27272a" strokeWidth="1.5" />
-                <circle cx="240" cy="220" r="4" fill={PORT_COLORS.video} stroke="#27272a" strokeWidth="1.5" />
-                <text x="200" y="224" textAnchor="middle" fill="#71717a" fontSize="10">Video</text>
+                <rect
+                  x="160"
+                  y="205"
+                  width="80"
+                  height="30"
+                  rx="6"
+                  fill="#18181b"
+                  stroke="#27272a"
+                />
+                <circle
+                  cx="160"
+                  cy="220"
+                  r="4"
+                  fill={PORT_COLORS.text}
+                  stroke="#27272a"
+                  strokeWidth="1.5"
+                />
+                <circle
+                  cx="240"
+                  cy="220"
+                  r="4"
+                  fill={PORT_COLORS.video}
+                  stroke="#27272a"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="200"
+                  y="224"
+                  textAnchor="middle"
+                  fill="#71717a"
+                  fontSize="10"
+                >
+                  Video
+                </text>
                 {/* Music */}
-                <rect x="300" y="135" width="80" height="30" rx="6" fill="#18181b" stroke="#27272a" />
-                <circle cx="300" cy="150" r="4" fill={PORT_COLORS.image} stroke="#27272a" strokeWidth="1.5" />
-                <circle cx="380" cy="150" r="4" fill={PORT_COLORS.audio} stroke="#27272a" strokeWidth="1.5" />
-                <text x="340" y="154" textAnchor="middle" fill="#71717a" fontSize="10">Music</text>
+                <rect
+                  x="300"
+                  y="135"
+                  width="80"
+                  height="30"
+                  rx="6"
+                  fill="#18181b"
+                  stroke="#27272a"
+                />
+                <circle
+                  cx="300"
+                  cy="150"
+                  r="4"
+                  fill={PORT_COLORS.image}
+                  stroke="#27272a"
+                  strokeWidth="1.5"
+                />
+                <circle
+                  cx="380"
+                  cy="150"
+                  r="4"
+                  fill={PORT_COLORS.audio}
+                  stroke="#27272a"
+                  strokeWidth="1.5"
+                />
+                <text
+                  x="340"
+                  y="154"
+                  textAnchor="middle"
+                  fill="#71717a"
+                  fontSize="10"
+                >
+                  Music
+                </text>
               </svg>
             </div>
           </div>
@@ -1128,11 +1268,7 @@ function Capabilities() {
   ]
 
   return (
-    <section
-      id="features"
-      ref={f.ref}
-      className={`px-6 py-28 ${f.className}`}
-    >
+    <section id="features" ref={f.ref} className={`px-6 py-28 ${f.className}`}>
       <div className="mx-auto max-w-[1040px]">
         <p className="mb-3 text-[13px] font-medium text-zinc-600">
           Capabilities

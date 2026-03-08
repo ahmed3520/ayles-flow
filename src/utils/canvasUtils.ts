@@ -1,5 +1,18 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { BlockNodeData } from '@/types/nodes'
+import type { BlockNodeData, NodeContentType, PortType } from '@/types/nodes'
+import { getNodeReadableText } from '@/utils/nodeTextUtils'
+
+const DEFAULT_OUTPUT_PORT_BY_CONTENT_TYPE: Record<NodeContentType, PortType> = {
+  image: 'image',
+  text: 'text',
+  video: 'video',
+  audio: 'audio',
+  music: 'audio',
+  note: 'text',
+  ticket: 'text',
+  pdf: 'pdf',
+  website: 'text',
+}
 
 /**
  * Generates a unique node ID
@@ -8,11 +21,55 @@ export function generateNodeId(counter: number): string {
   return `node-${counter}`
 }
 
+function getNodeOutputPortType(node?: Node): PortType | null {
+  if (!node) return null
+  const data = node.data as BlockNodeData
+  return (
+    data.outputType ?? DEFAULT_OUTPUT_PORT_BY_CONTENT_TYPE[data.contentType]
+  )
+}
+
+export function normalizeEdgeHandleIds(
+  nodes: Array<Node>,
+  edges: Array<Edge>,
+): Array<Edge> {
+  const nodeLookup = new Map(nodes.map((node) => [node.id, node]))
+
+  return edges.map((edge) => {
+    const sourcePortType = getNodeOutputPortType(nodeLookup.get(edge.source))
+
+    if (!sourcePortType) return edge
+
+    const nextSourceHandle =
+      !edge.sourceHandle || edge.sourceHandle === 'output'
+        ? `output-${sourcePortType}`
+        : edge.sourceHandle
+
+    const nextTargetHandle =
+      !edge.targetHandle || edge.targetHandle === 'input'
+        ? `input-${sourcePortType}`
+        : edge.targetHandle
+
+    if (
+      nextSourceHandle === edge.sourceHandle &&
+      nextTargetHandle === edge.targetHandle
+    ) {
+      return edge
+    }
+
+    return {
+      ...edge,
+      sourceHandle: nextSourceHandle,
+      targetHandle: nextTargetHandle,
+    }
+  })
+}
+
 /**
  * Returns the highest numeric ID from existing nodes (pattern: node-{N}).
  * Used to initialize nodeIdRef so new nodes don't collide with loaded ones.
  */
-export function computeMaxNodeId(nodes: Node[]): number {
+export function computeMaxNodeId(nodes: Array<Node>): number {
   let max = 0
   for (const node of nodes) {
     const match = node.id.match(/^node-(\d+)$/)
@@ -39,8 +96,13 @@ export function extractPortType(
  * Validates if a connection between two nodes is allowed
  */
 export function validateConnection(
-  connection: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null },
-  edges: Edge[],
+  connection: {
+    source: string
+    target: string
+    sourceHandle?: string | null
+    targetHandle?: string | null
+  },
+  edges: Array<Edge>,
 ): boolean {
   // Prevent self-connections
   if (connection.source === connection.target) return false
@@ -77,16 +139,17 @@ export function validateConnection(
  * Copies selected nodes and their internal connections
  */
 export function copyNodes(
-  nodes: Node[],
-  edges: Edge[],
-  selectedNodeIds: string[],
-): { nodes: Node[]; edges: Edge[] } | null {
+  nodes: Array<Node>,
+  edges: Array<Edge>,
+  selectedNodeIds: Array<string>,
+): { nodes: Array<Node>; edges: Array<Edge> } | null {
   const selectedNodes = nodes.filter((n) => selectedNodeIds.includes(n.id))
   if (selectedNodes.length === 0) return null
 
   // Find edges that connect only selected nodes
   const selectedEdges = edges.filter(
-    (e) => selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target),
+    (e) =>
+      selectedNodeIds.includes(e.source) && selectedNodeIds.includes(e.target),
   )
 
   return {
@@ -99,17 +162,17 @@ export function copyNodes(
  * Pastes nodes at an offset position with new IDs
  */
 export function pasteNodes(
-  copiedData: { nodes: Node[]; edges: Edge[] },
+  copiedData: { nodes: Array<Node>; edges: Array<Edge> },
   idCounter: number,
   offset = { x: 50, y: 50 },
 ): {
-  nodes: Node[]
-  edges: Edge[]
+  nodes: Array<Node>
+  edges: Array<Edge>
   newIdCounter: number
-  newNodeIds: string[]
+  newNodeIds: Array<string>
 } {
   const idMap = new Map<string, string>()
-  const newNodes: Node[] = []
+  const newNodes: Array<Node> = []
   let currentCounter = idCounter
 
   // Create new nodes with updated IDs and positions
@@ -129,7 +192,7 @@ export function pasteNodes(
   })
 
   // Create new edges with updated node IDs
-  const newEdges: Edge[] = copiedData.edges.map((edge) => ({
+  const newEdges: Array<Edge> = copiedData.edges.map((edge) => ({
     ...edge,
     id: `${idMap.get(edge.source)}-${idMap.get(edge.target)}`,
     source: idMap.get(edge.source)!,
@@ -149,7 +212,7 @@ export function pasteNodes(
  */
 export function resolveConnectedInputs(
   nodeId: string,
-  edges: Edge[],
+  edges: Array<Edge>,
   getNode: (id: string) => Node | undefined,
 ): Record<string, string> {
   const connectedInputs: Record<string, string> = {}
@@ -164,9 +227,9 @@ export function resolveConnectedInputs(
     const srcData = srcNode.data as BlockNodeData
 
     if (inputType === 'text') {
-      // Text input: use prompt from connected node
-      if (srcData.prompt?.trim()) {
-        connectedInputs[inputType] = srcData.prompt
+      const text = getNodeReadableText(srcData)
+      if (text.trim()) {
+        connectedInputs[inputType] = text
       }
     } else {
       // Media input: use resultUrl from connected node

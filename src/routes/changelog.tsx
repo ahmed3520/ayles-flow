@@ -7,6 +7,20 @@ export const Route = createFileRoute('/changelog')({ component: Changelog })
 function Changelog() {
   const entries = [
     {
+      date: 'March 7, 2026',
+      title: 'Notes, Tickets & Responsive UI',
+      items: [
+        'Note blocks — color-coded sticky notes with rich text editing and 5 color themes',
+        'Ticket blocks — task cards with status (todo, doing, done), priority levels, and tags',
+        'Image action bar — upscale, remove background, download, and replace directly from the toolbar',
+        'Responsive layout fixes across the app',
+        'Agent reliability improvements — automatic reconnection and session recovery',
+        'Undo and redo support on the canvas',
+        'Fixed Kimi model compatibility with the agent',
+        'General agent stability and performance fixes',
+      ],
+    },
+    {
       date: 'February 17, 2026',
       title: 'Launch',
       items: [
