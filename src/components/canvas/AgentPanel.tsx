@@ -321,10 +321,25 @@ function ToolCallLine({
 }) {
   const Icon = getToolIcon(tool)
   const s = status || 'done'
+  const isDeepResearch = tool === 'deep_research'
+  const statusText =
+    s === 'pending' && typeof args?.__status === 'string'
+      ? args.__status
+      : ''
+  const errorText =
+    error && typeof args?.__error === 'string' ? args.__error : ''
+  const displayArgs =
+    args && ('__status' in args || '__error' in args)
+      ? Object.fromEntries(
+          Object.entries(args).filter(
+            ([key]) => key !== '__status' && key !== '__error',
+          ),
+        )
+      : args
   // Old messages stored in Convex have `label` string, new ones have `args` object
   const { verb, detail } =
-    args && Object.keys(args).length > 0
-      ? formatToolLabel(tool, args, s)
+    displayArgs && Object.keys(displayArgs).length > 0
+      ? formatToolLabel(tool, displayArgs, s)
       : legacyLabel
         ? (() => {
             const m = legacyLabel.match(/^(\S+):?\s+(.*)$/)
@@ -333,30 +348,180 @@ function ToolCallLine({
               : { verb: legacyLabel, detail: '' }
           })()
         : { verb: tool, detail: '' }
+  const expandableDetail = statusText || errorText
+  const hasExpandableDetail = Boolean(expandableDetail)
+  const lineDetail =
+    isDeepResearch && hasExpandableDetail
+      ? detail
+      : statusText || errorText || detail
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const deepResearchTopic =
+    typeof displayArgs?.topic === 'string' && displayArgs.topic.trim()
+      ? displayArgs.topic.trim()
+      : detail
+  const deepResearchStateLabel = errorText
+    ? 'Failed'
+    : s === 'pending'
+      ? 'Running'
+      : 'Done'
+
+  useEffect(() => {
+    if (errorText) {
+      setDetailsOpen(true)
+    }
+  }, [errorText])
+
+  if (isDeepResearch) {
+    return (
+      <div className="py-1">
+        <button
+          type="button"
+          onClick={() => {
+            if (!hasExpandableDetail) return
+            setDetailsOpen((current) => !current)
+          }}
+          className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
+            errorText
+              ? 'border-red-500/30 bg-red-500/8 hover:border-red-500/40'
+              : 'border-zinc-700/60 bg-zinc-900/80 hover:border-zinc-600'
+          } ${hasExpandableDetail ? 'cursor-pointer' : 'cursor-default'}`}
+          aria-expanded={hasExpandableDetail ? detailsOpen : undefined}
+          title={hasExpandableDetail ? 'Toggle research details' : undefined}
+        >
+          <div className="flex items-start gap-3">
+            <div
+              className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${
+                errorText
+                  ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                  : 'border-zinc-700 bg-zinc-800 text-zinc-300'
+              }`}
+            >
+              {s === 'pending' ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : error ? (
+                <X size={15} />
+              ) : (
+                <BookOpen size={15} />
+              )}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`text-sm font-medium ${
+                    errorText ? 'text-red-100' : 'text-zinc-100'
+                  }`}
+                >
+                  Deep Research
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] ${
+                    errorText
+                      ? 'bg-red-500/12 text-red-300'
+                      : 'bg-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  {deepResearchStateLabel}
+                </span>
+              </div>
+
+              {deepResearchTopic && (
+                <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+                  {deepResearchTopic}
+                </div>
+              )}
+
+              {hasExpandableDetail && !detailsOpen && (
+                <div
+                  className={`mt-2 truncate text-[11px] ${
+                    errorText ? 'text-red-300' : 'text-zinc-500'
+                  }`}
+                >
+                  {expandableDetail}
+                </div>
+              )}
+            </div>
+
+            {hasExpandableDetail && (
+              <ChevronDown
+                size={14}
+                className={`mt-1 shrink-0 text-zinc-500 transition-transform ${
+                  detailsOpen ? '' : '-rotate-90'
+                }`}
+              />
+            )}
+          </div>
+
+          {hasExpandableDetail && detailsOpen && (
+            <div
+              className={`mt-3 rounded-lg border px-3 py-2 text-[11px] leading-relaxed whitespace-pre-wrap break-words ${
+                errorText
+                  ? 'border-red-500/25 bg-red-500/10 text-red-200'
+                  : 'border-zinc-700/60 bg-zinc-950/70 text-zinc-400'
+              }`}
+            >
+              {expandableDetail}
+            </div>
+          )}
+        </button>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex items-center gap-1.5 py-0.5 text-xs group/tc">
-      {s === 'pending' ? (
-        <Loader2 size={13} className="text-blue-400/60 animate-spin shrink-0" />
-      ) : error ? (
-        <X size={13} className="text-red-400 shrink-0" />
-      ) : (
-        <Check size={13} className="text-zinc-500 shrink-0" />
-      )}
-      <span
-        className={`font-medium shrink-0 ${error ? 'text-red-400' : 'text-zinc-300'}`}
-      >
-        {verb}
-      </span>
-      <Icon size={12} className="text-zinc-500 shrink-0" />
-      {detail && (
-        <span className="text-zinc-400 font-mono truncate">{detail}</span>
-      )}
-      {s !== 'pending' && detail && (
-        <CopyButton
-          text={detail}
-          className="opacity-0 group-hover/tc:opacity-100 ml-auto"
-        />
+    <div className="py-0.5">
+      <div className="flex items-center gap-1.5 text-xs group/tc">
+        {s === 'pending' ? (
+          <Loader2 size={13} className="text-zinc-400 animate-spin shrink-0" />
+        ) : error ? (
+          <X size={13} className="text-red-400 shrink-0" />
+        ) : (
+          <Check size={13} className="text-zinc-500 shrink-0" />
+        )}
+        <span
+          className={`font-medium shrink-0 ${error ? 'text-red-400' : 'text-zinc-300'}`}
+        >
+          {verb}
+        </span>
+        <Icon size={12} className="text-zinc-500 shrink-0" />
+        {lineDetail && (
+          <span
+            className={`font-mono truncate ${errorText ? 'text-red-300' : 'text-zinc-400'}`}
+          >
+            {lineDetail}
+          </span>
+        )}
+        {hasExpandableDetail && (
+          <button
+            type="button"
+            onClick={() => setDetailsOpen((current) => !current)}
+            className="ml-auto inline-flex items-center gap-1 rounded px-1 py-0.5 text-[10px] text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+            title={detailsOpen ? 'Collapse details' : 'Expand details'}
+          >
+            <span>{detailsOpen ? 'Hide' : 'Show'}</span>
+            <ChevronDown
+              size={11}
+              className={`transition-transform ${detailsOpen ? '' : '-rotate-90'}`}
+            />
+          </button>
+        )}
+        {s !== 'pending' && detail && !hasExpandableDetail && (
+          <CopyButton
+            text={detail}
+            className="opacity-0 group-hover/tc:opacity-100 ml-auto"
+          />
+        )}
+      </div>
+      {hasExpandableDetail && detailsOpen && (
+        <div
+          className={`mt-1 ml-6 rounded-md border px-2 py-1.5 text-[11px] leading-relaxed whitespace-pre-wrap break-words ${
+            errorText
+              ? 'border-red-500/40 bg-red-500/10 text-red-200'
+              : 'border-zinc-700/60 bg-zinc-900/70 text-zinc-400'
+          }`}
+        >
+          {expandableDetail}
+        </div>
       )}
     </div>
   )
@@ -697,7 +862,6 @@ interface AgentPanelProps {
 export default function AgentPanel({
   messages,
   isStreaming,
-  toolStatus,
   agentModel,
   onModelChange,
   onSend,
@@ -861,11 +1025,6 @@ export default function AgentPanel({
         />
       ) : (
         <>
-          {toolStatus && (
-            <div className="border-b border-zinc-800 px-4 py-2 text-[11px] text-zinc-500">
-              {toolStatus}
-            </div>
-          )}
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {messages.length === 0 && (
@@ -894,7 +1053,7 @@ export default function AgentPanel({
                       setResearchMode(true)
                       inputRef.current?.focus()
                     }}
-                    className="px-2.5 py-1.5 text-[11px] text-blue-400/70 bg-blue-500/5 border border-blue-500/20 rounded-lg hover:bg-blue-500/10 hover:text-blue-300 transition-colors flex items-center gap-1"
+                    className="px-2.5 py-1.5 text-[11px] text-zinc-300 bg-zinc-800/80 border border-zinc-700/50 rounded-lg hover:bg-zinc-800 hover:text-zinc-100 transition-colors flex items-center gap-1"
                   >
                     <Globe size={10} />
                     Deep Research
@@ -920,7 +1079,7 @@ export default function AgentPanel({
           <div className="px-3 pb-3 pt-1.5">
             {researchMode && (
               <div className="flex items-center gap-2 mb-1.5 px-1">
-                <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-400">
+                <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800 border border-zinc-700/60 text-[11px] text-zinc-300">
                   <Globe size={10} />
                   Deep Research
                 </div>
@@ -933,7 +1092,7 @@ export default function AgentPanel({
               </div>
             )}
             <div
-              className={`bg-zinc-800/60 border rounded-xl px-3 pt-2.5 pb-1.5 ${researchMode ? 'border-blue-500/30' : 'border-zinc-700/40'}`}
+              className={`bg-zinc-800/60 border rounded-xl px-3 pt-2.5 pb-1.5 ${researchMode ? 'border-zinc-600/70' : 'border-zinc-700/40'}`}
             >
               <div className="flex items-end gap-2">
                 <textarea
@@ -990,7 +1149,7 @@ export default function AgentPanel({
                   onClick={() => setResearchMode(!researchMode)}
                   className={`flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded transition-colors ${
                     researchMode
-                      ? 'text-blue-400 bg-blue-500/10'
+                      ? 'bg-zinc-800 text-zinc-200'
                       : 'text-zinc-600 hover:text-zinc-400'
                   }`}
                   title="Toggle deep research mode"

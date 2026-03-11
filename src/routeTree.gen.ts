@@ -12,13 +12,17 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as QuasarRouteImport } from './routes/quasar'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as DocsRouteImport } from './routes/docs'
+import { Route as DemoRouteImport } from './routes/demo'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as ChangelogRouteImport } from './routes/changelog'
 import { Route as CanvasRouteImport } from './routes/canvas'
 import { Route as BillingRouteImport } from './routes/billing'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as FeaturesIndexRouteImport } from './routes/features.index'
+import { Route as FeaturesSlugRouteImport } from './routes/features.$slug'
 import { Route as DemoConvexRouteImport } from './routes/demo/convex'
 import { Route as CanvasProjectIdRouteImport } from './routes/canvas.$projectId'
 import { Route as DemoStartServerFuncsRouteImport } from './routes/demo/start.server-funcs'
@@ -44,9 +48,19 @@ const PrivacyRoute = PrivacyRouteImport.update({
   path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FeaturesRoute = FeaturesRouteImport.update({
+  id: '/features',
+  path: '/features',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DocsRoute = DocsRouteImport.update({
   id: '/docs',
   path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DemoRoute = DemoRouteImport.update({
+  id: '/demo',
+  path: '/demo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ContactRoute = ContactRouteImport.update({
@@ -79,10 +93,20 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FeaturesIndexRoute = FeaturesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => FeaturesRoute,
+} as any)
+const FeaturesSlugRoute = FeaturesSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => FeaturesRoute,
+} as any)
 const DemoConvexRoute = DemoConvexRouteImport.update({
-  id: '/demo/convex',
-  path: '/demo/convex',
-  getParentRoute: () => rootRouteImport,
+  id: '/convex',
+  path: '/convex',
+  getParentRoute: () => DemoRoute,
 } as any)
 const CanvasProjectIdRoute = CanvasProjectIdRouteImport.update({
   id: '/$projectId',
@@ -90,39 +114,39 @@ const CanvasProjectIdRoute = CanvasProjectIdRouteImport.update({
   getParentRoute: () => CanvasRoute,
 } as any)
 const DemoStartServerFuncsRoute = DemoStartServerFuncsRouteImport.update({
-  id: '/demo/start/server-funcs',
-  path: '/demo/start/server-funcs',
-  getParentRoute: () => rootRouteImport,
+  id: '/start/server-funcs',
+  path: '/start/server-funcs',
+  getParentRoute: () => DemoRoute,
 } as any)
 const DemoStartApiRequestRoute = DemoStartApiRequestRouteImport.update({
-  id: '/demo/start/api-request',
-  path: '/demo/start/api-request',
-  getParentRoute: () => rootRouteImport,
+  id: '/start/api-request',
+  path: '/start/api-request',
+  getParentRoute: () => DemoRoute,
 } as any)
 const DemoApiNamesRoute = DemoApiNamesRouteImport.update({
-  id: '/demo/api/names',
-  path: '/demo/api/names',
-  getParentRoute: () => rootRouteImport,
+  id: '/api/names',
+  path: '/api/names',
+  getParentRoute: () => DemoRoute,
 } as any)
 const DemoStartSsrIndexRoute = DemoStartSsrIndexRouteImport.update({
-  id: '/demo/start/ssr/',
-  path: '/demo/start/ssr/',
-  getParentRoute: () => rootRouteImport,
+  id: '/start/ssr/',
+  path: '/start/ssr/',
+  getParentRoute: () => DemoRoute,
 } as any)
 const DemoStartSsrSpaModeRoute = DemoStartSsrSpaModeRouteImport.update({
-  id: '/demo/start/ssr/spa-mode',
-  path: '/demo/start/ssr/spa-mode',
-  getParentRoute: () => rootRouteImport,
+  id: '/start/ssr/spa-mode',
+  path: '/start/ssr/spa-mode',
+  getParentRoute: () => DemoRoute,
 } as any)
 const DemoStartSsrFullSsrRoute = DemoStartSsrFullSsrRouteImport.update({
-  id: '/demo/start/ssr/full-ssr',
-  path: '/demo/start/ssr/full-ssr',
-  getParentRoute: () => rootRouteImport,
+  id: '/start/ssr/full-ssr',
+  path: '/start/ssr/full-ssr',
+  getParentRoute: () => DemoRoute,
 } as any)
 const DemoStartSsrDataOnlyRoute = DemoStartSsrDataOnlyRouteImport.update({
-  id: '/demo/start/ssr/data-only',
-  path: '/demo/start/ssr/data-only',
-  getParentRoute: () => rootRouteImport,
+  id: '/start/ssr/data-only',
+  path: '/start/ssr/data-only',
+  getParentRoute: () => DemoRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -132,12 +156,16 @@ export interface FileRoutesByFullPath {
   '/canvas': typeof CanvasRouteWithChildren
   '/changelog': typeof ChangelogRoute
   '/contact': typeof ContactRoute
+  '/demo': typeof DemoRouteWithChildren
   '/docs': typeof DocsRoute
+  '/features': typeof FeaturesRouteWithChildren
   '/privacy': typeof PrivacyRoute
   '/quasar': typeof QuasarRoute
   '/terms': typeof TermsRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
+  '/features/$slug': typeof FeaturesSlugRoute
+  '/features/': typeof FeaturesIndexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
   '/demo/start/server-funcs': typeof DemoStartServerFuncsRoute
@@ -153,12 +181,15 @@ export interface FileRoutesByTo {
   '/canvas': typeof CanvasRouteWithChildren
   '/changelog': typeof ChangelogRoute
   '/contact': typeof ContactRoute
+  '/demo': typeof DemoRouteWithChildren
   '/docs': typeof DocsRoute
   '/privacy': typeof PrivacyRoute
   '/quasar': typeof QuasarRoute
   '/terms': typeof TermsRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
+  '/features/$slug': typeof FeaturesSlugRoute
+  '/features': typeof FeaturesIndexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
   '/demo/start/server-funcs': typeof DemoStartServerFuncsRoute
@@ -175,12 +206,16 @@ export interface FileRoutesById {
   '/canvas': typeof CanvasRouteWithChildren
   '/changelog': typeof ChangelogRoute
   '/contact': typeof ContactRoute
+  '/demo': typeof DemoRouteWithChildren
   '/docs': typeof DocsRoute
+  '/features': typeof FeaturesRouteWithChildren
   '/privacy': typeof PrivacyRoute
   '/quasar': typeof QuasarRoute
   '/terms': typeof TermsRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
+  '/features/$slug': typeof FeaturesSlugRoute
+  '/features/': typeof FeaturesIndexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
   '/demo/start/server-funcs': typeof DemoStartServerFuncsRoute
@@ -198,12 +233,16 @@ export interface FileRouteTypes {
     | '/canvas'
     | '/changelog'
     | '/contact'
+    | '/demo'
     | '/docs'
+    | '/features'
     | '/privacy'
     | '/quasar'
     | '/terms'
     | '/canvas/$projectId'
     | '/demo/convex'
+    | '/features/$slug'
+    | '/features/'
     | '/demo/api/names'
     | '/demo/start/api-request'
     | '/demo/start/server-funcs'
@@ -219,12 +258,15 @@ export interface FileRouteTypes {
     | '/canvas'
     | '/changelog'
     | '/contact'
+    | '/demo'
     | '/docs'
     | '/privacy'
     | '/quasar'
     | '/terms'
     | '/canvas/$projectId'
     | '/demo/convex'
+    | '/features/$slug'
+    | '/features'
     | '/demo/api/names'
     | '/demo/start/api-request'
     | '/demo/start/server-funcs'
@@ -240,12 +282,16 @@ export interface FileRouteTypes {
     | '/canvas'
     | '/changelog'
     | '/contact'
+    | '/demo'
     | '/docs'
+    | '/features'
     | '/privacy'
     | '/quasar'
     | '/terms'
     | '/canvas/$projectId'
     | '/demo/convex'
+    | '/features/$slug'
+    | '/features/'
     | '/demo/api/names'
     | '/demo/start/api-request'
     | '/demo/start/server-funcs'
@@ -262,18 +308,12 @@ export interface RootRouteChildren {
   CanvasRoute: typeof CanvasRouteWithChildren
   ChangelogRoute: typeof ChangelogRoute
   ContactRoute: typeof ContactRoute
+  DemoRoute: typeof DemoRouteWithChildren
   DocsRoute: typeof DocsRoute
+  FeaturesRoute: typeof FeaturesRouteWithChildren
   PrivacyRoute: typeof PrivacyRoute
   QuasarRoute: typeof QuasarRoute
   TermsRoute: typeof TermsRoute
-  DemoConvexRoute: typeof DemoConvexRoute
-  DemoApiNamesRoute: typeof DemoApiNamesRoute
-  DemoStartApiRequestRoute: typeof DemoStartApiRequestRoute
-  DemoStartServerFuncsRoute: typeof DemoStartServerFuncsRoute
-  DemoStartSsrDataOnlyRoute: typeof DemoStartSsrDataOnlyRoute
-  DemoStartSsrFullSsrRoute: typeof DemoStartSsrFullSsrRoute
-  DemoStartSsrSpaModeRoute: typeof DemoStartSsrSpaModeRoute
-  DemoStartSsrIndexRoute: typeof DemoStartSsrIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -299,11 +339,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/features': {
+      id: '/features'
+      path: '/features'
+      fullPath: '/features'
+      preLoaderRoute: typeof FeaturesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/docs': {
       id: '/docs'
       path: '/docs'
       fullPath: '/docs'
       preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/demo': {
+      id: '/demo'
+      path: '/demo'
+      fullPath: '/demo'
+      preLoaderRoute: typeof DemoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/contact': {
@@ -348,12 +402,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/features/': {
+      id: '/features/'
+      path: '/'
+      fullPath: '/features/'
+      preLoaderRoute: typeof FeaturesIndexRouteImport
+      parentRoute: typeof FeaturesRoute
+    }
+    '/features/$slug': {
+      id: '/features/$slug'
+      path: '/$slug'
+      fullPath: '/features/$slug'
+      preLoaderRoute: typeof FeaturesSlugRouteImport
+      parentRoute: typeof FeaturesRoute
+    }
     '/demo/convex': {
       id: '/demo/convex'
-      path: '/demo/convex'
+      path: '/convex'
       fullPath: '/demo/convex'
       preLoaderRoute: typeof DemoConvexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DemoRoute
     }
     '/canvas/$projectId': {
       id: '/canvas/$projectId'
@@ -364,52 +432,52 @@ declare module '@tanstack/react-router' {
     }
     '/demo/start/server-funcs': {
       id: '/demo/start/server-funcs'
-      path: '/demo/start/server-funcs'
+      path: '/start/server-funcs'
       fullPath: '/demo/start/server-funcs'
       preLoaderRoute: typeof DemoStartServerFuncsRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DemoRoute
     }
     '/demo/start/api-request': {
       id: '/demo/start/api-request'
-      path: '/demo/start/api-request'
+      path: '/start/api-request'
       fullPath: '/demo/start/api-request'
       preLoaderRoute: typeof DemoStartApiRequestRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DemoRoute
     }
     '/demo/api/names': {
       id: '/demo/api/names'
-      path: '/demo/api/names'
+      path: '/api/names'
       fullPath: '/demo/api/names'
       preLoaderRoute: typeof DemoApiNamesRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DemoRoute
     }
     '/demo/start/ssr/': {
       id: '/demo/start/ssr/'
-      path: '/demo/start/ssr'
+      path: '/start/ssr'
       fullPath: '/demo/start/ssr/'
       preLoaderRoute: typeof DemoStartSsrIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DemoRoute
     }
     '/demo/start/ssr/spa-mode': {
       id: '/demo/start/ssr/spa-mode'
-      path: '/demo/start/ssr/spa-mode'
+      path: '/start/ssr/spa-mode'
       fullPath: '/demo/start/ssr/spa-mode'
       preLoaderRoute: typeof DemoStartSsrSpaModeRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DemoRoute
     }
     '/demo/start/ssr/full-ssr': {
       id: '/demo/start/ssr/full-ssr'
-      path: '/demo/start/ssr/full-ssr'
+      path: '/start/ssr/full-ssr'
       fullPath: '/demo/start/ssr/full-ssr'
       preLoaderRoute: typeof DemoStartSsrFullSsrRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DemoRoute
     }
     '/demo/start/ssr/data-only': {
       id: '/demo/start/ssr/data-only'
-      path: '/demo/start/ssr/data-only'
+      path: '/start/ssr/data-only'
       fullPath: '/demo/start/ssr/data-only'
       preLoaderRoute: typeof DemoStartSsrDataOnlyRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof DemoRoute
     }
   }
 }
@@ -425,17 +493,18 @@ const CanvasRouteChildren: CanvasRouteChildren = {
 const CanvasRouteWithChildren =
   CanvasRoute._addFileChildren(CanvasRouteChildren)
 
-const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  AboutRoute: AboutRoute,
-  BillingRoute: BillingRoute,
-  CanvasRoute: CanvasRouteWithChildren,
-  ChangelogRoute: ChangelogRoute,
-  ContactRoute: ContactRoute,
-  DocsRoute: DocsRoute,
-  PrivacyRoute: PrivacyRoute,
-  QuasarRoute: QuasarRoute,
-  TermsRoute: TermsRoute,
+interface DemoRouteChildren {
+  DemoConvexRoute: typeof DemoConvexRoute
+  DemoApiNamesRoute: typeof DemoApiNamesRoute
+  DemoStartApiRequestRoute: typeof DemoStartApiRequestRoute
+  DemoStartServerFuncsRoute: typeof DemoStartServerFuncsRoute
+  DemoStartSsrDataOnlyRoute: typeof DemoStartSsrDataOnlyRoute
+  DemoStartSsrFullSsrRoute: typeof DemoStartSsrFullSsrRoute
+  DemoStartSsrSpaModeRoute: typeof DemoStartSsrSpaModeRoute
+  DemoStartSsrIndexRoute: typeof DemoStartSsrIndexRoute
+}
+
+const DemoRouteChildren: DemoRouteChildren = {
   DemoConvexRoute: DemoConvexRoute,
   DemoApiNamesRoute: DemoApiNamesRoute,
   DemoStartApiRequestRoute: DemoStartApiRequestRoute,
@@ -444,6 +513,37 @@ const rootRouteChildren: RootRouteChildren = {
   DemoStartSsrFullSsrRoute: DemoStartSsrFullSsrRoute,
   DemoStartSsrSpaModeRoute: DemoStartSsrSpaModeRoute,
   DemoStartSsrIndexRoute: DemoStartSsrIndexRoute,
+}
+
+const DemoRouteWithChildren = DemoRoute._addFileChildren(DemoRouteChildren)
+
+interface FeaturesRouteChildren {
+  FeaturesSlugRoute: typeof FeaturesSlugRoute
+  FeaturesIndexRoute: typeof FeaturesIndexRoute
+}
+
+const FeaturesRouteChildren: FeaturesRouteChildren = {
+  FeaturesSlugRoute: FeaturesSlugRoute,
+  FeaturesIndexRoute: FeaturesIndexRoute,
+}
+
+const FeaturesRouteWithChildren = FeaturesRoute._addFileChildren(
+  FeaturesRouteChildren,
+)
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  AboutRoute: AboutRoute,
+  BillingRoute: BillingRoute,
+  CanvasRoute: CanvasRouteWithChildren,
+  ChangelogRoute: ChangelogRoute,
+  ContactRoute: ContactRoute,
+  DemoRoute: DemoRouteWithChildren,
+  DocsRoute: DocsRoute,
+  FeaturesRoute: FeaturesRouteWithChildren,
+  PrivacyRoute: PrivacyRoute,
+  QuasarRoute: QuasarRoute,
+  TermsRoute: TermsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

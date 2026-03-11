@@ -252,12 +252,12 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
           x: {
             type: 'number',
             description:
-              'X position on canvas. Space nodes ~300px apart horizontally.',
+              'Optional X position on canvas. Prefer leaving blank unless the user asks for specific placement; default layout stacks nodes vertically.',
           },
           y: {
             type: 'number',
             description:
-              'Y position on canvas. Space nodes ~200px apart vertically.',
+              'Optional Y position on canvas. Prefer leaving blank unless the user asks for specific placement; default layout stacks nodes vertically.',
           },
           previewUrl: {
             type: 'string',
@@ -731,7 +731,7 @@ To edit, restyle, or create variations of an existing image:
 User has node-1 (completed image of a cat). User says: "make it look like a watercolor painting"
 
 CORRECT:
-→ add_node(contentType="image", prompt="watercolor painting style, soft brushstrokes, artistic", model="fal-ai/flux-pro/kontext", label="Watercolor Cat", x=node1.x+300, y=node1.y)
+→ add_node(contentType="image", prompt="watercolor painting style, soft brushstrokes, artistic", model="fal-ai/flux-pro/kontext", label="Watercolor Cat", x=node1.x, y=node1.y+300)
 → connect_nodes(sourceNodeId="node-1", targetNodeId="node-2", portType="image")
 
 WRONG — DO NOT DO THIS:
@@ -743,7 +743,7 @@ This destroys the original image and doesn't use image-to-image — it regenerat
 User has node-3 (completed image of a landscape). User says: "make the sky darker"
 
 CORRECT:
-→ add_node(contentType="image", prompt="same scene but with a much darker, moodier sky, deep shadows", model="fal-ai/ideogram/v3", label="Dark Sky Edit", x=node3.x+300, y=node3.y)
+→ add_node(contentType="image", prompt="same scene but with a much darker, moodier sky, deep shadows", model="fal-ai/ideogram/v3", label="Dark Sky Edit", x=node3.x, y=node3.y+300)
 → connect_nodes(sourceNodeId="node-3", targetNodeId="node-4", portType="image")
 
 WRONG — DO NOT DO THIS:
@@ -761,13 +761,13 @@ To animate an existing image into a video:
 <example>
 User has node-1 (completed image of a waterfall). User says: "animate this"
 
-→ add_node(contentType="video", prompt="gentle flowing water animation, subtle camera movement, nature ambience", model="fal-ai/kling-video/v2.1/master/image-to-video", label="Waterfall Video", x=node1.x+300, y=node1.y)
+→ add_node(contentType="video", prompt="gentle flowing water animation, subtle camera movement, nature ambience", model="fal-ai/kling-video/v2.1/master/image-to-video", label="Waterfall Video", x=node1.x, y=node1.y+300)
 → connect_nodes(sourceNodeId="node-1", targetNodeId="node-2", portType="image")
 </example>
 </pattern>
 
 <pattern name="multi_step_pipeline">
-Chain nodes left-to-right for complex workflows:
+Stack nodes top-to-bottom for complex workflows (same column when possible):
 - Text → Image → Image edit → Video
 - Image → fan out to multiple edits
 - Image → both a video AND an image edit in parallel
@@ -776,9 +776,9 @@ Chain nodes left-to-right for complex workflows:
 User: "Create a cinematic workflow: generate a cyberpunk city, then make a neon version, then animate it"
 
 → add_node(contentType="image", prompt="cyberpunk city skyline, rain, neon signs, blade runner style", model="fal-ai/flux-pro/v1.1-ultra", label="Cyberpunk City", x=100, y=100)
-→ add_node(contentType="image", prompt="extreme neon glow, vibrant pink and blue neon lights everywhere, hyper saturated", model="fal-ai/flux-pro/kontext", label="Neon Version", x=400, y=100)
+→ add_node(contentType="image", prompt="extreme neon glow, vibrant pink and blue neon lights everywhere, hyper saturated", model="fal-ai/flux-pro/kontext", label="Neon Version", x=100, y=400)
 → connect_nodes(sourceNodeId="node-1", targetNodeId="node-2", portType="image")
-→ add_node(contentType="video", prompt="slow cinematic camera pan through the neon city, rain drops, atmospheric", model="fal-ai/kling-video/v2.1/master/image-to-video", label="City Animation", x=700, y=100)
+→ add_node(contentType="video", prompt="slow cinematic camera pan through the neon city, rain drops, atmospheric", model="fal-ai/kling-video/v2.1/master/image-to-video", label="City Animation", x=100, y=700)
 → connect_nodes(sourceNodeId="node-2", targetNodeId="node-3", portType="image")
 
 Note: The user will need to generate each node in order (node-1 first, then node-2, then node-3) since each depends on the previous result.
@@ -803,11 +803,11 @@ Generate multiple variations of the same source image by fanning out.
 <example>
 User has node-1 (completed portrait). User says: "give me 3 style variations"
 
-→ add_node(contentType="image", prompt="oil painting style, thick brushstrokes, classical art", model="fal-ai/flux-pro/kontext", label="Oil Painting", x=node1.x+300, y=node1.y-200)
+→ add_node(contentType="image", prompt="oil painting style, thick brushstrokes, classical art", model="fal-ai/flux-pro/kontext", label="Oil Painting", x=node1.x-220, y=node1.y+300)
 → connect_nodes(sourceNodeId="node-1", targetNodeId="node-2", portType="image")
-→ add_node(contentType="image", prompt="anime style, cel shaded, vibrant colors, manga aesthetic", model="fal-ai/flux-pro/kontext", label="Anime Style", x=node1.x+300, y=node1.y)
+→ add_node(contentType="image", prompt="anime style, cel shaded, vibrant colors, manga aesthetic", model="fal-ai/flux-pro/kontext", label="Anime Style", x=node1.x, y=node1.y+300)
 → connect_nodes(sourceNodeId="node-1", targetNodeId="node-3", portType="image")
-→ add_node(contentType="image", prompt="pixel art style, retro 16-bit aesthetic, limited color palette", model="fal-ai/flux-pro/kontext", label="Pixel Art", x=node1.x+300, y=node1.y+200)
+→ add_node(contentType="image", prompt="pixel art style, retro 16-bit aesthetic, limited color palette", model="fal-ai/flux-pro/kontext", label="Pixel Art", x=node1.x+220, y=node1.y+300)
 → connect_nodes(sourceNodeId="node-1", targetNodeId="node-4", portType="image")
 </example>
 </pattern>
@@ -817,7 +817,7 @@ User has node-1 (completed portrait). User says: "give me 3 style variations"
 <rules>
 1. Model-contentType matching: the model's contentType MUST match the node's contentType. Never assign an image model to a video node.
 2. Port type matching: only connect matching types (image→image, text→text, audio→audio, video→video).
-3. Layout: space nodes ~300px apart horizontally, ~200px vertically. Build pipelines left-to-right.
+3. Layout: default to vertical stacking (same x, y+~300). Only set custom x/y when the user explicitly asks for a specific placement or when a branch layout is clearer.
 4. Node IDs: new nodes get IDs automatically. Only reference existing node IDs from the canvas state.
 5. Explain briefly: tell the user what you're doing and why.
 6. Ask when unclear: if ambiguous, ask before acting.
@@ -877,7 +877,7 @@ IMPORTANT workflow — when to create a PDF:
 - If the user says "research X": do deep_research only. After research, ask if they want a PDF.
 - If the user says "make that a PDF" or "create PDF" referring to existing research: call create_pdf with the research content.
 
-Place the PDF node next to the research node (x+300 from that node).
+Place the PDF node below the research node by default (same x, y+~300) unless the user asks for a specific position.
 </create_pdf_tool>
 
 <coding_tools>

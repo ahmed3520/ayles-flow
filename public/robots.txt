@@ -1,4 +1,8 @@
 User-agent: *
 Allow: /
+Disallow: /demo
+Disallow: /demo/
+Disallow: /canvas
+Disallow: /billing
 
 Sitemap: https://aylesflow.com/sitemap.xml

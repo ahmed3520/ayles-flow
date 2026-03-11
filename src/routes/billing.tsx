@@ -18,8 +18,19 @@ import {
 import { useEffect, useState } from 'react'
 
 import { api } from '../../convex/_generated/api'
+import { buildSeoHead } from '@/utils/seo'
 
 export const Route = createFileRoute('/billing')({
+  head: () =>
+    buildSeoHead({
+      title: 'Billing | Ayles Flow',
+      description: 'Manage your Ayles Flow plan and credits.',
+      path: '/billing',
+      noindex: true,
+    }),
+  headers: () => ({
+    'X-Robots-Tag': 'noindex, nofollow',
+  }),
   component: BillingPage,
   ssr: false,
 })
@@ -97,9 +108,7 @@ function BillingContent() {
               </p>
             </div>
           </div>
-          <UserButton
-            appearance={{ elements: { avatarBox: 'w-9 h-9' } }}
-          />
+          <UserButton appearance={{ elements: { avatarBox: 'w-9 h-9' } }} />
         </div>
 
         {/* Current Plan Card */}

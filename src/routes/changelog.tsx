@@ -1,8 +1,36 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 import StaticPageLayout from '@/components/StaticPageLayout'
+import {
+  buildBreadcrumbSchema,
+  buildSeoHead,
+  buildWebPageSchema,
+} from '@/utils/seo'
 
-export const Route = createFileRoute('/changelog')({ component: Changelog })
+const CHANGELOG_TITLE = 'Ayles Flow Changelog | Product Updates'
+const CHANGELOG_DESCRIPTION =
+  'Track Ayles Flow product updates, new workflow features, model coverage, and platform improvements.'
+
+export const Route = createFileRoute('/changelog')({
+  head: () =>
+    buildSeoHead({
+      title: CHANGELOG_TITLE,
+      description: CHANGELOG_DESCRIPTION,
+      path: '/changelog',
+      schema: [
+        buildWebPageSchema({
+          title: CHANGELOG_TITLE,
+          description: CHANGELOG_DESCRIPTION,
+          path: '/changelog',
+        }),
+        buildBreadcrumbSchema([
+          { name: 'Home', path: '/' },
+          { name: 'Changelog', path: '/changelog' },
+        ]),
+      ],
+    }),
+  component: Changelog,
+})
 
 function Changelog() {
   const entries = [
@@ -48,7 +76,10 @@ function Changelog() {
 
       <div className="space-y-10 pt-2">
         {entries.map((entry) => (
-          <div key={entry.date} className="relative pl-6 border-l border-zinc-800/60">
+          <div
+            key={entry.date}
+            className="relative pl-6 border-l border-zinc-800/60"
+          >
             <div className="absolute left-0 top-1 w-2 h-2 rounded-full bg-zinc-700 -translate-x-[5px]" />
             <p className="text-[12px] text-zinc-600 font-medium uppercase tracking-wide mb-1">
               {entry.date}

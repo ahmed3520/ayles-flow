@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import AIBlockContent from './AIBlockContent'
 import NoteBlockContent from './NoteBlockContent'
 import TicketBlockContent from './TicketBlockContent'
@@ -25,7 +26,7 @@ type BlockNodeContentProps = {
   videoStyle: CSSProperties
 }
 
-export default function BlockNodeContent({
+function BlockNodeContent({
   config,
   data,
   deployLogs,
@@ -88,3 +89,5 @@ export default function BlockNodeContent({
       )
   }
 }
+
+export default memo(BlockNodeContent)

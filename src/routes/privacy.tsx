@@ -1,15 +1,41 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 import StaticPageLayout from '@/components/StaticPageLayout'
+import {
+  buildBreadcrumbSchema,
+  buildSeoHead,
+  buildWebPageSchema,
+} from '@/utils/seo'
 
-export const Route = createFileRoute('/privacy')({ component: Privacy })
+const PRIVACY_TITLE = 'Privacy Policy | Ayles Flow'
+const PRIVACY_DESCRIPTION =
+  'Read the Ayles Flow privacy policy covering account data, project storage, model providers, and user rights.'
+
+export const Route = createFileRoute('/privacy')({
+  head: () =>
+    buildSeoHead({
+      title: PRIVACY_TITLE,
+      description: PRIVACY_DESCRIPTION,
+      path: '/privacy',
+      schema: [
+        buildWebPageSchema({
+          title: PRIVACY_TITLE,
+          description: PRIVACY_DESCRIPTION,
+          path: '/privacy',
+        }),
+        buildBreadcrumbSchema([
+          { name: 'Home', path: '/' },
+          { name: 'Privacy', path: '/privacy' },
+        ]),
+      ],
+    }),
+  component: Privacy,
+})
 
 function Privacy() {
   return (
     <StaticPageLayout title="Privacy Policy">
-      <p className="text-zinc-500 text-[13px]">
-        Last updated: February 2026
-      </p>
+      <p className="text-zinc-500 text-[13px]">Last updated: February 2026</p>
 
       <section>
         <h2 className="text-xl font-semibold text-zinc-200 mb-3">
@@ -54,12 +80,11 @@ function Privacy() {
           4. Third-Party Services
         </h2>
         <p>
-          We use third-party AI model providers (including Quasar, Google,
-          Black Forest Labs, OpenAI, Stability AI, Kling, MiniMax, and
-          ElevenLabs) to process your generation requests. Your prompts and
-          input data may be sent to these providers to fulfill your requests.
-          Each provider has their own privacy policy governing their use of
-          this data.
+          We use third-party AI model providers (including Quasar, Google, Black
+          Forest Labs, OpenAI, Stability AI, Kling, MiniMax, and ElevenLabs) to
+          process your generation requests. Your prompts and input data may be
+          sent to these providers to fulfill your requests. Each provider has
+          their own privacy policy governing their use of this data.
         </p>
       </section>
 
@@ -90,9 +115,7 @@ function Privacy() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold text-zinc-200 mb-3">
-          7. Contact
-        </h2>
+        <h2 className="text-xl font-semibold text-zinc-200 mb-3">7. Contact</h2>
         <p>
           If you have questions about this privacy policy, please contact us at{' '}
           <a

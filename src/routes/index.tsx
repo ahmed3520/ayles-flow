@@ -8,8 +8,36 @@ import { api } from '../../convex/_generated/api'
 
 import CanvasPreview from '@/components/CanvasPreview'
 import LandingPage from '@/components/LandingPage'
+import { FEATURE_PAGES } from '@/data/featurePages'
+import {
+  buildOrganizationSchema,
+  buildSeoHead,
+  buildSoftwareApplicationSchema,
+  buildWebsiteSchema,
+} from '@/utils/seo'
 
-export const Route = createFileRoute('/')({ component: Home })
+const HOME_TITLE =
+  'AI Workflow Builder for Media Generation, Research & PDFs | Ayles Flow'
+const HOME_DESCRIPTION =
+  'Build image, video, audio, music, text, research, and PDF workflows on one visual canvas. Use agents to create, connect, and run production pipelines.'
+
+export const Route = createFileRoute('/')({
+  head: () =>
+    buildSeoHead({
+      title: HOME_TITLE,
+      description: HOME_DESCRIPTION,
+      path: '/',
+      schema: [
+        buildWebsiteSchema({ description: HOME_DESCRIPTION }),
+        buildOrganizationSchema(),
+        buildSoftwareApplicationSchema({
+          description: HOME_DESCRIPTION,
+          featureList: FEATURE_PAGES.map((page) => page.title),
+        }),
+      ],
+    }),
+  component: Home,
+})
 
 function StoreUser({ storeUser }: { storeUser: () => void }) {
   useEffect(() => {

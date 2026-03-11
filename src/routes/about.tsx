@@ -1,8 +1,36 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 
 import StaticPageLayout from '@/components/StaticPageLayout'
+import {
+  buildBreadcrumbSchema,
+  buildSeoHead,
+  buildWebPageSchema,
+} from '@/utils/seo'
 
-export const Route = createFileRoute('/about')({ component: About })
+const ABOUT_TITLE = 'About Ayles Flow | Visual AI Workflow Platform'
+const ABOUT_DESCRIPTION =
+  'Learn what Ayles Flow is building: a visual AI workflow platform for multimodal production, agent automation, deep research, and PDF deliverables.'
+
+export const Route = createFileRoute('/about')({
+  head: () =>
+    buildSeoHead({
+      title: ABOUT_TITLE,
+      description: ABOUT_DESCRIPTION,
+      path: '/about',
+      schema: [
+        buildWebPageSchema({
+          title: ABOUT_TITLE,
+          description: ABOUT_DESCRIPTION,
+          path: '/about',
+        }),
+        buildBreadcrumbSchema([
+          { name: 'Home', path: '/' },
+          { name: 'About', path: '/about' },
+        ]),
+      ],
+    }),
+  component: About,
+})
 
 function About() {
   return (
@@ -19,9 +47,9 @@ function About() {
         <p>
           AI models are powerful but fragmented. You need one tool for images,
           another for video, another for audio. Connecting outputs between them
-          means copying files, switching tabs, and losing context. For teams,
-          it gets worse — no shared workspace, no reusable workflows, no
-          visibility into what was tried before.
+          means copying files, switching tabs, and losing context. For teams, it
+          gets worse — no shared workspace, no reusable workflows, no visibility
+          into what was tried before.
         </p>
       </section>
 
@@ -77,17 +105,17 @@ function About() {
         <p>
           We integrate with leading AI providers including Quasar, Google
           (Imagen 4, Lyria 2), Black Forest Labs (FLUX), OpenAI (GPT Image),
-          Kling (Video), MiniMax (Video, Music), ElevenLabs (Speech),
-          Stability AI, and more. New models are added regularly.
+          Kling (Video), MiniMax (Video, Music), ElevenLabs (Speech), Stability
+          AI, and more. New models are added regularly.
         </p>
       </section>
 
       <div className="pt-4">
         <Link
-          to="/"
+          to="/features"
           className="inline-flex rounded-full bg-white px-6 py-2.5 text-[14px] font-semibold text-zinc-950 transition-opacity hover:opacity-85"
         >
-          Try Ayles Flow free
+          Explore the feature pages
         </Link>
       </div>
     </StaticPageLayout>

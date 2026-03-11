@@ -15,6 +15,7 @@ import json
 import os
 import re
 import logging
+import math
 import uuid
 from collections import Counter
 from typing import Optional
@@ -99,6 +100,104 @@ class VirtualState:
         self.preview_url: Optional[str] = None
         self.has_website_node = any(n.get("contentType") == "website" for n in self.nodes)
         self.active_text_editor = dict(active_text_editor) if active_text_editor else None
+
+
+DEFAULT_NODE_X = 100.0
+DEFAULT_NODE_Y = 100.0
+DEFAULT_VERTICAL_NODE_GAP = 300.0
+NODE_COLLISION_X = 190.0
+NODE_COLLISION_Y = 170.0
+NODE_PLACEMENT_SCAN_LIMIT = 40
+
+
+def _coerce_coord(value: object) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            number = float(stripped)
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _node_position(node: dict) -> tuple[float, float]:
+    x = _coerce_coord(node.get("x"))
+    y = _coerce_coord(node.get("y"))
+    return (
+        x if x is not None else DEFAULT_NODE_X,
+        y if y is not None else DEFAULT_NODE_Y,
+    )
+
+
+def _default_new_node_position(state: VirtualState) -> tuple[float, float]:
+    if not state.nodes:
+        return DEFAULT_NODE_X, DEFAULT_NODE_Y
+
+    positions = [_node_position(node) for node in state.nodes]
+    xs = sorted(x for x, _ in positions)
+    middle = len(xs) // 2
+    median_x = (
+        xs[middle]
+        if len(xs) % 2 == 1
+        else (xs[middle - 1] + xs[middle]) / 2
+    )
+
+    same_column = [
+        (x, y) for x, y in positions if abs(x - median_x) <= NODE_COLLISION_X
+    ]
+    if same_column:
+        anchor_x = sum(x for x, _ in same_column) / len(same_column)
+        anchor_y = max(y for _, y in same_column)
+    else:
+        anchor_x, anchor_y = positions[-1]
+
+    candidate_x = anchor_x
+    candidate_y = anchor_y + DEFAULT_VERTICAL_NODE_GAP
+
+    for _ in range(NODE_PLACEMENT_SCAN_LIMIT):
+        has_overlap = any(
+            abs(existing_x - candidate_x) < NODE_COLLISION_X
+            and abs(existing_y - candidate_y) < NODE_COLLISION_Y
+            for existing_x, existing_y in positions
+        )
+        if not has_overlap:
+            break
+        candidate_y += DEFAULT_VERTICAL_NODE_GAP
+
+    return round(candidate_x, 2), round(candidate_y, 2)
+
+
+def _resolve_new_node_position(args: dict, state: VirtualState) -> tuple[float, float]:
+    requested_x = _coerce_coord(args.get("x"))
+    requested_y = _coerce_coord(args.get("y"))
+    default_x, default_y = _default_new_node_position(state)
+
+    return (
+        requested_x if requested_x is not None else default_x,
+        requested_y if requested_y is not None else default_y,
+    )
+
+
+def _extract_tool_error_message(result: str) -> Optional[str]:
+    try:
+        payload = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error = payload.get("error")
+    return error if isinstance(error, str) and error.strip() else None
 
 
 def _plain_text(value: str) -> str:
@@ -703,9 +802,7 @@ async def _execute_tool(
 
         node_id = f"node-{state.next_node_id}"
         state.next_node_id += 1
-        last = state.nodes[-1] if state.nodes else None
-        x = args.get("x") or (last["x"] + 300 if last else 100)
-        y = args.get("y") or (last["y"] if last else 100)
+        x, y = _resolve_new_node_position(args, state)
 
         node = {"id": node_id, "contentType": ct, "label": args.get("label", f"New {ct} block"), "prompt": args.get("prompt", ""), "model": args.get("model", ""), "generationStatus": "idle", "x": x, "y": y}
         state.nodes.append(node)
@@ -859,9 +956,7 @@ async def _execute_tool(
             research_node_type = "note" if has_active_editor else "text"
             node_id = f"node-{state.next_node_id}"
             state.next_node_id += 1
-            last = state.nodes[-1] if state.nodes else None
-            x = args.get("x") or (last["x"] + 300 if last else 100)
-            y = args.get("y") or (last["y"] if last else 100)
+            x, y = _resolve_new_node_position(args, state)
 
             node = {
                 "id": node_id,
@@ -953,9 +1048,7 @@ async def _execute_tool(
         sources = args.get("sources") or []
         if not markdown.strip():
             return json.dumps({"error": "Markdown content is required"}), None, None
-        last = state.nodes[-1] if state.nodes else None
-        x = args.get("x") or (last["x"] + 300 if last else 100)
-        y = args.get("y") or (last["y"] if last else 100)
+        x, y = _resolve_new_node_position(args, state)
         action = {"type": "create_pdf", "title": title, "markdown": markdown, "sources": sources, "x": x, "y": y}
         return json.dumps({"success": True, "message": "PDF creation initiated on client"}), action, None
 
@@ -1227,12 +1320,37 @@ async def _agent_event_stream(req: AgentChatRequest):
                     })
                     continue
 
-                result, action, sources = await _execute_tool(
-                    state, req.models, tc["name"], args, write, req.projectId, model,
+                while not event_queue.empty():
+                    yield event_queue.get_nowait()
+
+                tool_task = asyncio.create_task(
+                    _execute_tool(
+                        state, req.models, tc["name"], args, write, req.projectId, model,
+                    ),
                 )
 
+                while not tool_task.done():
+                    try:
+                        queued_event = await asyncio.wait_for(
+                            event_queue.get(),
+                            timeout=0.25,
+                        )
+                    except asyncio.TimeoutError:
+                        continue
+                    yield queued_event
+
+                result, action, sources = await tool_task
+
+                while not event_queue.empty():
+                    yield event_queue.get_nowait()
+
                 is_error = result.startswith('{"error"')
-                evt = {"type": "tool_call", "tool": tc["name"], "args": _strip_large_args(args)}
+                evt_args = _strip_large_args(args)
+                if is_error:
+                    error_message = _extract_tool_error_message(result)
+                    if error_message:
+                        evt_args["__error"] = error_message
+                evt = {"type": "tool_call", "tool": tc["name"], "args": evt_args}
                 if is_error:
                     evt["error"] = True
                 yield evt
@@ -1245,11 +1363,6 @@ async def _agent_event_stream(req: AgentChatRequest):
                         yield {"type": "action", "action": action}
                 if sources:
                     yield {"type": "resources", "sources": sources}
-
-                # Drain any queued events
-                while not event_queue.empty():
-                    evt = event_queue.get_nowait()
-                    yield evt
 
                 messages.append({
                     "role": "tool",
@@ -1535,7 +1648,7 @@ To edit, restyle, or create variations of an existing image:
 User has node-1 (completed image of a cat). User says: "make it look like a watercolor painting"
 
 CORRECT:
-→ add_node(contentType="image", prompt="watercolor painting style, soft brushstrokes, artistic", model="fal-ai/flux-pro/kontext", label="Watercolor Cat", x=node1.x+300, y=node1.y)
+→ add_node(contentType="image", prompt="watercolor painting style, soft brushstrokes, artistic", model="fal-ai/flux-pro/kontext", label="Watercolor Cat", x=node1.x, y=node1.y+300)
 → connect_nodes(sourceNodeId="node-1", targetNodeId="node-2", portType="image")
 
 WRONG — DO NOT DO THIS:
@@ -1552,7 +1665,7 @@ To animate an existing image into a video:
 </pattern>
 
 <pattern name="multi_step_pipeline">
-Chain nodes left-to-right for complex workflows:
+Stack nodes top-to-bottom for complex workflows (same column when possible):
 - Text → Image → Image edit → Video
 - Image → fan out to multiple edits
 - Image → both a video AND an image edit in parallel
@@ -1574,7 +1687,7 @@ Generate multiple variations of the same source image by fanning out.
 <rules>
 1. Model-contentType matching: the model's contentType MUST match the node's contentType.
 2. Port type matching: only connect matching types (image→image, text→text, audio→audio, video→video).
-3. Layout: space nodes ~300px apart horizontally, ~200px vertically.
+3. Layout: default to vertical stacking (same x, y+~300). Only set custom x/y when the user explicitly asks for a specific placement or when a branch layout is clearer.
 4. Node IDs: new nodes get IDs automatically. Only reference existing node IDs.
 5. Explain briefly: tell the user what you're doing and why.
 6. Ask when unclear: if ambiguous, ask before acting.

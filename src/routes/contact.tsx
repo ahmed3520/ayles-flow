@@ -2,8 +2,36 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Mail, MessageSquare } from 'lucide-react'
 
 import StaticPageLayout from '@/components/StaticPageLayout'
+import {
+  buildBreadcrumbSchema,
+  buildSeoHead,
+  buildWebPageSchema,
+} from '@/utils/seo'
 
-export const Route = createFileRoute('/contact')({ component: Contact })
+const CONTACT_TITLE = 'Contact Ayles Flow | Support, Feedback, and Enterprise'
+const CONTACT_DESCRIPTION =
+  'Contact Ayles Flow for product help, bug reports, enterprise questions, support, and feedback.'
+
+export const Route = createFileRoute('/contact')({
+  head: () =>
+    buildSeoHead({
+      title: CONTACT_TITLE,
+      description: CONTACT_DESCRIPTION,
+      path: '/contact',
+      schema: [
+        buildWebPageSchema({
+          title: CONTACT_TITLE,
+          description: CONTACT_DESCRIPTION,
+          path: '/contact',
+        }),
+        buildBreadcrumbSchema([
+          { name: 'Home', path: '/' },
+          { name: 'Contact', path: '/contact' },
+        ]),
+      ],
+    }),
+  component: Contact,
+})
 
 function Contact() {
   return (
@@ -23,9 +51,7 @@ function Contact() {
             <h3 className="text-[15px] font-semibold text-zinc-200 mb-1">
               Email
             </h3>
-            <p className="text-[13px] text-zinc-500">
-              hello@aylesflow.com
-            </p>
+            <p className="text-[13px] text-zinc-500">hello@aylesflow.com</p>
             <p className="text-[12px] text-zinc-600 mt-1">
               We typically respond within 24 hours.
             </p>
@@ -69,9 +95,7 @@ function Contact() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold text-zinc-200 mb-3">
-          Enterprise
-        </h2>
+        <h2 className="text-xl font-semibold text-zinc-200 mb-3">Enterprise</h2>
         <p>
           Need custom integrations, higher limits, or a dedicated instance?
           Reach out to{' '}

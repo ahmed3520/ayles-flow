@@ -59,7 +59,18 @@ export function createAgentStreamAccumulator({
       }
 
       case 'tool_status':
-        setToolStatus(event.status)
+        setToolStatus(null)
+        for (let index = parts.length - 1; index >= 0; index--) {
+          const part = parts[index]
+          if (part.type === 'tool_call' && part.status === 'pending') {
+            parts[index] = {
+              ...part,
+              args: { ...part.args, __status: event.status },
+            }
+            updateAssistant({ parts: [...parts] })
+            return
+          }
+        }
         return
 
       case 'tool_start':

@@ -245,41 +245,55 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
   const imageResizeMinHeight =
     data.contentType === 'image' ? 80 : defaults.minHeight
 
-  const nodeFrameSize = useStore(
+  const nodeFrameWidth = useStore(
     useCallback(
       (state: { nodeLookup: Map<string, Node> }) => {
         const node = state.nodeLookup.get(id)
 
-        return {
-          width:
-            typeof node?.style?.width === 'number'
-              ? node.style.width
-              : defaults.width,
-          height:
-            typeof node?.style?.height === 'number'
-              ? node.style.height
-              : defaults.height,
-        }
+        return typeof node?.style?.width === 'number'
+          ? node.style.width
+          : defaults.width
       },
-      [defaults.height, defaults.width, id],
+      [defaults.width, id],
+    ),
+  )
+  const nodeFrameHeight = useStore(
+    useCallback(
+      (state: { nodeLookup: Map<string, Node> }) => {
+        const node = state.nodeLookup.get(id)
+
+        return typeof node?.style?.height === 'number'
+          ? node.style.height
+          : defaults.height
+      },
+      [defaults.height, id],
     ),
   )
 
   const rotationDeg = data.rotationDeg || 0
   const flipX = data.flipX ? -1 : 1
   const flipY = data.flipY ? -1 : 1
-  const mediaTransformStyle: CSSProperties = {
-    transform: `rotate(${rotationDeg}deg) scale(${flipX}, ${flipY})`,
-    transformOrigin: 'center',
-  }
-  const imageStyle: CSSProperties = {
-    ...mediaTransformStyle,
-    objectFit: 'contain',
-  }
-  const videoStyle: CSSProperties = {
-    ...mediaTransformStyle,
-    objectFit: 'cover',
-  }
+  const mediaTransformStyle = useMemo<CSSProperties>(
+    () => ({
+      transform: `rotate(${rotationDeg}deg) scale(${flipX}, ${flipY})`,
+      transformOrigin: 'center',
+    }),
+    [flipX, flipY, rotationDeg],
+  )
+  const imageStyle = useMemo<CSSProperties>(
+    () => ({
+      ...mediaTransformStyle,
+      objectFit: 'contain',
+    }),
+    [mediaTransformStyle],
+  )
+  const videoStyle = useMemo<CSSProperties>(
+    () => ({
+      ...mediaTransformStyle,
+      objectFit: 'cover',
+    }),
+    [mediaTransformStyle],
+  )
 
   const [isShiftHeld, setIsShiftHeld] = useState(false)
   const keepAspectOnResize = data.contentType === 'image' || isShiftHeld
@@ -499,7 +513,7 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
     if (!(data.imageWidth && data.imageHeight)) return
 
     const imageAspect = data.imageWidth / data.imageHeight
-    const frameAspect = nodeFrameSize.width / nodeFrameSize.height
+    const frameAspect = nodeFrameWidth / nodeFrameHeight
 
     if (!Number.isFinite(imageAspect) || !Number.isFinite(frameAspect)) return
     if (Math.abs(imageAspect - frameAspect) < 0.03) return
@@ -510,8 +524,8 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
     data.imageHeight,
     data.imageWidth,
     fitNodeToImageAspect,
-    nodeFrameSize.height,
-    nodeFrameSize.width,
+    nodeFrameHeight,
+    nodeFrameWidth,
   ])
 
   useEffect(() => {
@@ -729,4 +743,10 @@ function BlockNode({ id, data, selected }: NodeProps<BlockNodeType>) {
   )
 }
 
-export default memo(BlockNode)
+export default memo(
+  BlockNode,
+  (prevProps, nextProps) =>
+    prevProps.id === nextProps.id &&
+    prevProps.selected === nextProps.selected &&
+    prevProps.data === nextProps.data,
+)

@@ -9,8 +9,19 @@ import { api } from '../../convex/_generated/api'
 import type { Id } from '../../convex/_generated/dataModel'
 
 import Canvas from '@/components/canvas/Canvas'
+import { buildSeoHead } from '@/utils/seo'
 
 export const Route = createFileRoute('/canvas/$projectId')({
+  head: ({ params }) =>
+    buildSeoHead({
+      title: 'Project Canvas | Ayles Flow',
+      description: 'Project canvas workspace for Ayles Flow.',
+      path: `/canvas/${params.projectId}`,
+      noindex: true,
+    }),
+  headers: () => ({
+    'X-Robots-Tag': 'noindex, nofollow',
+  }),
   component: CanvasProjectPage,
   ssr: false,
 })

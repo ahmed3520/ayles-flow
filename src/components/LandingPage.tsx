@@ -28,6 +28,7 @@ import type { Edge, Node } from '@xyflow/react'
 import type { BlockNodeData } from '@/types/nodes'
 import BlockNodeComponent from '@/components/canvas/nodes/BlockNode'
 import Footer from '@/components/Footer'
+import { FEATURE_PAGES, getFeaturePagePath } from '@/data/featurePages'
 import { NODE_DEFAULTS } from '@/types/nodes'
 
 /* ------------------------------------------------------------------ */
@@ -720,12 +721,13 @@ function Hero({ onSignIn }: { onSignIn: () => void }) {
         </a>
 
         <h1 className="font-logo text-[clamp(3rem,7vw,5.5rem)] leading-[1.05] tracking-[-0.02em] text-white italic">
-          Ready to flow?
+          Build AI workflows on one canvas.
         </h1>
 
         <p className="mx-auto mt-6 max-w-lg text-[17px] leading-relaxed text-zinc-500">
-          Design, deploy, and scale AI workflows on one infinite canvas. Use any
-          model. Let agents build the pipeline.
+          Design and run multimodal pipelines across research, text, image,
+          video, audio, music, and PDF generation. Let agents build and iterate
+          the workflow for your team.
         </p>
 
         <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
@@ -1408,6 +1410,56 @@ function Pricing({ onSignIn }: { onSignIn: () => void }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Feature Routes                                                     */
+/* ------------------------------------------------------------------ */
+
+function FeatureRoutes() {
+  const f = useFadeIn<HTMLElement>()
+
+  return (
+    <section ref={f.ref} className={`px-6 py-28 ${f.className}`}>
+      <div className="mx-auto max-w-[1040px]">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="mb-3 text-[13px] font-medium text-zinc-600">
+              Search-ready pages
+            </p>
+            <h2 className="max-w-xl text-[clamp(1.75rem,3.5vw,2.5rem)] font-bold tracking-[-0.025em] text-white">
+              Product pages built around
+              <br />
+              what the platform actually does.
+            </h2>
+          </div>
+          <a
+            href="/features"
+            className="inline-flex rounded-full border border-zinc-800 px-5 py-2.5 text-[14px] text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
+          >
+            See all features
+          </a>
+        </div>
+
+        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {FEATURE_PAGES.map((page) => (
+            <a
+              key={page.slug}
+              href={getFeaturePagePath(page.slug)}
+              className="group rounded-2xl border border-zinc-800/60 bg-zinc-900/20 p-5 transition-colors hover:border-zinc-700/60 hover:bg-zinc-900/40"
+            >
+              <h3 className="text-[15px] font-semibold text-zinc-100 transition-colors group-hover:text-white">
+                {page.title}
+              </h3>
+              <p className="mt-2 text-[14px] leading-relaxed text-zinc-500">
+                {page.summary}
+              </p>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /*  Final CTA                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -1454,6 +1506,7 @@ export default function LandingPage() {
       <AgentShowcase />
       <Steps />
       <Capabilities />
+      <FeatureRoutes />
       <Pricing onSignIn={handleSignIn} />
       <Cta onSignIn={handleSignIn} />
       <Footer onSignIn={handleSignIn} />

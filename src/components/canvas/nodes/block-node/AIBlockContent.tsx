@@ -2,7 +2,7 @@ import { AlertCircle, Download, Loader2 } from 'lucide-react'
 import { code } from '@streamdown/code'
 import { Streamdown } from 'streamdown'
 
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, memo } from 'react'
 import type { CSSProperties, SyntheticEvent } from 'react'
 
 import type { BlockNodeData } from '@/types/nodes'
@@ -23,7 +23,7 @@ type AIBlockContentProps = {
   videoStyle: CSSProperties
 }
 
-export default function AIBlockContent({
+function AIBlockContent({
   config,
   data,
   hasResult,
@@ -137,3 +137,5 @@ export default function AIBlockContent({
     </div>
   )
 }
+
+export default memo(AIBlockContent)

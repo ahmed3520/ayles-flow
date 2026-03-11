@@ -24,10 +24,7 @@ import {
   X,
 } from 'lucide-react'
 import Placeholder from '@tiptap/extension-placeholder'
-import Table from '@tiptap/extension-table'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
-import TableRow from '@tiptap/extension-table-row'
+import { TableKit } from '@tiptap/extension-table'
 import { Node as TiptapNode, mergeAttributes } from '@tiptap/core'
 import {
   EditorContent,
@@ -726,12 +723,11 @@ export default function TextEditorWorkspace({
           newGroupDelay: 300,
         },
       }),
-      Table.configure({
-        resizable: true,
+      TableKit.configure({
+        table: {
+          resizable: true,
+        },
       }),
-      TableRow,
-      TableHeader,
-      TableCell,
       RichImage,
       Placeholder.configure({
         placeholder: 'Start writing...',

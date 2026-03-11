@@ -1,8 +1,36 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 import StaticPageLayout from '@/components/StaticPageLayout'
+import {
+  buildBreadcrumbSchema,
+  buildSeoHead,
+  buildWebPageSchema,
+} from '@/utils/seo'
 
-export const Route = createFileRoute('/quasar')({ component: Quasar })
+const QUASAR_TITLE = 'Quasar on Ayles Flow | Long-Context AI Workflows'
+const QUASAR_DESCRIPTION =
+  'Learn how Ayles Flow uses Quasar for long-context reasoning and production-grade AI workflows on the canvas.'
+
+export const Route = createFileRoute('/quasar')({
+  head: () =>
+    buildSeoHead({
+      title: QUASAR_TITLE,
+      description: QUASAR_DESCRIPTION,
+      path: '/quasar',
+      schema: [
+        buildWebPageSchema({
+          title: QUASAR_TITLE,
+          description: QUASAR_DESCRIPTION,
+          path: '/quasar',
+        }),
+        buildBreadcrumbSchema([
+          { name: 'Home', path: '/' },
+          { name: 'Quasar', path: '/quasar' },
+        ]),
+      ],
+    }),
+  component: Quasar,
+})
 
 function Quasar() {
   return (
@@ -33,9 +61,7 @@ function Quasar() {
           and reason over entire systems — not just short conversations — while
           maintaining performance and stability.
         </p>
-        <p className="mt-4">
-          This makes Quasar fundamentally different.
-        </p>
+        <p className="mt-4">This makes Quasar fundamentally different.</p>
       </section>
 
       <section>

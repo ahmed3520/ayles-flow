@@ -1,24 +1,50 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 import StaticPageLayout from '@/components/StaticPageLayout'
+import {
+  buildBreadcrumbSchema,
+  buildSeoHead,
+  buildWebPageSchema,
+} from '@/utils/seo'
 
-export const Route = createFileRoute('/terms')({ component: Terms })
+const TERMS_TITLE = 'Terms of Service | Ayles Flow'
+const TERMS_DESCRIPTION =
+  'Read the Ayles Flow terms covering accounts, billing, acceptable use, generated content, and service limits.'
+
+export const Route = createFileRoute('/terms')({
+  head: () =>
+    buildSeoHead({
+      title: TERMS_TITLE,
+      description: TERMS_DESCRIPTION,
+      path: '/terms',
+      schema: [
+        buildWebPageSchema({
+          title: TERMS_TITLE,
+          description: TERMS_DESCRIPTION,
+          path: '/terms',
+        }),
+        buildBreadcrumbSchema([
+          { name: 'Home', path: '/' },
+          { name: 'Terms', path: '/terms' },
+        ]),
+      ],
+    }),
+  component: Terms,
+})
 
 function Terms() {
   return (
     <StaticPageLayout title="Terms of Service">
-      <p className="text-zinc-500 text-[13px]">
-        Last updated: February 2026
-      </p>
+      <p className="text-zinc-500 text-[13px]">Last updated: February 2026</p>
 
       <section>
         <h2 className="text-xl font-semibold text-zinc-200 mb-3">
           1. Acceptance of Terms
         </h2>
         <p>
-          By accessing or using Ayles Flow, you agree to be bound by these
-          Terms of Service. If you do not agree to these terms, you may not use
-          our services.
+          By accessing or using Ayles Flow, you agree to be bound by these Terms
+          of Service. If you do not agree to these terms, you may not use our
+          services.
         </p>
       </section>
 
@@ -91,10 +117,10 @@ function Terms() {
         </h2>
         <p>
           Ayles Flow is provided &quot;as is&quot; without warranties of any
-          kind. We are not liable for any indirect, incidental, or
-          consequential damages arising from your use of the service. Our total
-          liability is limited to the amount you have paid us in the twelve
-          months preceding the claim.
+          kind. We are not liable for any indirect, incidental, or consequential
+          damages arising from your use of the service. Our total liability is
+          limited to the amount you have paid us in the twelve months preceding
+          the claim.
         </p>
       </section>
 
@@ -110,9 +136,7 @@ function Terms() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold text-zinc-200 mb-3">
-          9. Contact
-        </h2>
+        <h2 className="text-xl font-semibold text-zinc-200 mb-3">9. Contact</h2>
         <p>
           For questions about these terms, contact us at{' '}
           <a
