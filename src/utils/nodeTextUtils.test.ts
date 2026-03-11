@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   createWordDocumentHtml,
+  markdownToRichTextHtml,
   replaceNodeDocumentText,
   richTextToMarkdown,
 } from '@/utils/nodeTextUtils'
@@ -44,6 +45,30 @@ describe('richTextToMarkdown', () => {
 
   it('passes through non-html content', () => {
     expect(richTextToMarkdown('Plain text content')).toBe('Plain text content')
+  })
+
+  it('converts html tables into markdown tables', () => {
+    expect(
+      richTextToMarkdown(
+        '<table><thead><tr><th>Attribute</th><th>Quasar</th></tr></thead><tbody><tr><td>Context window</td><td>2M tokens</td></tr><tr><td>Open weights</td><td>Yes</td></tr></tbody></table>',
+      ),
+    ).toBe(
+      '| Attribute | Quasar |\n| --- | --- |\n| Context window | 2M tokens |\n| Open weights | Yes |',
+    )
+  })
+})
+
+describe('markdownToRichTextHtml', () => {
+  it('converts markdown tables into html tables', () => {
+    const html = markdownToRichTextHtml(
+      '| Attribute | Quasar |\n|---|---|\n| Context window | 2M tokens |\n| Open weights | Yes |',
+    )
+
+    expect(html).toContain('<table>')
+    expect(html).toContain('<thead>')
+    expect(html).toContain('<th>Attribute</th>')
+    expect(html).toContain('<tbody>')
+    expect(html).toContain('<td>2M tokens</td>')
   })
 })
 

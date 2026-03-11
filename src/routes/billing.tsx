@@ -43,7 +43,7 @@ function BillingContent() {
 
   const isPro = subscription?.plan === 'pro'
   const credits = subscription?.credits ?? 0
-  const creditsLimit = subscription?.creditsLimit ?? 1.0
+  const creditsLimit = subscription?.creditsLimit ?? 10
   const creditPercent = creditsLimit > 0 ? (credits / creditsLimit) * 100 : 0
 
   const handleUpgrade = async () => {
@@ -197,7 +197,7 @@ function BillingContent() {
             name="Free"
             price="$0"
             features={[
-              '1.0 credits / month',
+              '10 credits / month',
               'All AI models',
               'Unlimited projects',
             ]}
@@ -205,9 +205,9 @@ function BillingContent() {
           />
           <PlanCard
             name="Pro"
-            price="$20"
+            price="$17"
             features={[
-              '50.0 credits / month',
+              '500 credits / month',
               'All AI models',
               'Unlimited projects',
               'Priority support',

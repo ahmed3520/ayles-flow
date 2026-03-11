@@ -9,7 +9,7 @@
  *   - At least one user signed in (needed for test generation record)
  *   - Models seeded (run seed mutation)
  *
- * Cost: ~0.003 credits (FLUX schnell) + ~0.02 credits (Gemini Flash text)
+ * Cost: ~0.11 credits (FLUX schnell) + ~0.03 credits (Gemini Flash text)
  */
 
 import { readFileSync } from 'fs'
@@ -55,19 +55,19 @@ const canRunConvex = isIntegration && !!CONVEX_URL
 
 // ── Pricing constants (must match convex/models.ts) ─────────────────────────
 
-const USD_PER_CREDIT = 0.0272 // $13.60 / 500 credits
+const USD_PER_CREDIT = 0.034 // $17 / 500 credits
 
 // Gemini 3 Flash — cheapest text model for testing
 const GEMINI_FLASH = {
   modelId: 'google/gemini-3-flash-preview',
-  inputTokenCost: 18, // credits per 1M input tokens
-  outputTokenCost: 110, // credits per 1M output tokens
+  inputTokenCost: 17.647, // credits per 1M input tokens
+  outputTokenCost: 105.882, // credits per 1M output tokens
 }
 
 // FLUX schnell — cheapest image model for testing
 const FLUX_SCHNELL = {
   modelId: 'fal-ai/flux-1/schnell',
-  creditCost: 0.15,
+  creditCost: 0.106,
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -408,10 +408,10 @@ describe.skipIf(!canRunFal)('FAL integration — real API', () => {
       expect(gen!.modelId).toBe(FLUX_SCHNELL.modelId)
       expect(gen!.contentType).toBe('image')
 
-      // 5. Verify flat-rate cost for FLUX schnell = 0.15 credits
-      expect(FLUX_SCHNELL.creditCost).toBe(0.15)
+      // 5. Verify flat-rate cost for FLUX schnell = 0.106 credits
+      expect(FLUX_SCHNELL.creditCost).toBe(0.106)
       const expectedBalance = STARTING_CREDITS - FLUX_SCHNELL.creditCost
-      expect(expectedBalance).toBe(99.85)
+      expect(expectedBalance).toBe(99.894)
 
       console.log(
         `  FAL gen: FLUX schnell = ${FLUX_SCHNELL.creditCost} credits. Expected balance after deduction: ${expectedBalance}`,

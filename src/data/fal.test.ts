@@ -145,4 +145,38 @@ describe('buildFalInput', () => {
     })
     expect(model).toBe('fal-ai/nano-banana-2')
   })
+
+  it('routes seedream lite to edit endpoint when image provided', () => {
+    const { input, model } = buildFalInput({
+      model: 'fal-ai/bytedance/seedream/v5/lite/text-to-image',
+      prompt: 'make it cinematic',
+      contentType: 'image',
+      imageUrl: 'https://example.com/img.png',
+    })
+    expect(model).toBe('fal-ai/bytedance/seedream/v5/lite/edit')
+    expect(input.image_urls).toEqual(['https://example.com/img.png'])
+    expect(input.image_url).toBeUndefined()
+  })
+
+  it('falls back seedream edit endpoint to base model without image', () => {
+    const { model, input } = buildFalInput({
+      model: 'fal-ai/bytedance/seedream/v5/lite/edit',
+      prompt: 'an astronaut portrait',
+      contentType: 'image',
+    })
+    expect(model).toBe('fal-ai/bytedance/seedream/v5/lite/text-to-image')
+    expect(input.image_urls).toBeUndefined()
+    expect(input.image_url).toBeUndefined()
+  })
+
+  it('maps legacy seedream base endpoint to text-to-image', () => {
+    const { model, input } = buildFalInput({
+      model: 'fal-ai/bytedance/seedream/v5/lite',
+      prompt: 'a portrait photo',
+      contentType: 'image',
+    })
+    expect(model).toBe('fal-ai/bytedance/seedream/v5/lite/text-to-image')
+    expect(input.image_urls).toBeUndefined()
+    expect(input.image_url).toBeUndefined()
+  })
 })

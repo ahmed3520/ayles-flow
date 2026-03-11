@@ -380,7 +380,7 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
     function: {
       name: 'deep_research',
       description:
-        'Perform deep multi-step web research on a topic. Generates search queries, searches the web from multiple angles, analyzes gaps, does follow-up searches, and synthesizes a structured research document with citations. Creates a note node on the canvas with the full document. Use when the user asks for in-depth research, a report, or wants to learn about a topic thoroughly.',
+        'Perform deep multi-step web research on a topic. Generates search queries, searches the web from multiple angles, analyzes gaps, does follow-up searches, and synthesizes a structured research document with citations. Creates a research node on the canvas with the full document, returns markdown in the tool result, auto-inserts that markdown into the active open text editor when one exists, and falls back to a text node when no editor is open. Use when the user asks for in-depth research, a report, or wants to learn about a topic thoroughly.',
       parameters: {
         type: 'object',
         properties: {
@@ -391,12 +391,12 @@ export const tools: Array<OpenAI.ChatCompletionTool> = [
           x: {
             type: 'number',
             description:
-              'X position for the research note on canvas. Optional.',
+              'X position for the research node on canvas. Optional.',
           },
           y: {
             type: 'number',
             description:
-              'Y position for the research note on canvas. Optional.',
+              'Y position for the research node on canvas. Optional.',
           },
         },
         required: ['topic'],
@@ -700,6 +700,8 @@ Text nodes can contain full editor documents, not just prompts.
 - Never use search_text with broad patterns like \`.*\` to dump a whole document. Use read_text instead.
 - Use read_text to fetch the full plain-text content of a text node or the open editor on demand.
 - Use edit_text for live selection-aware or cursor-aware edits in the open Tiptap editor.
+- If the user asks to add/insert/append content into the open text editor, use edit_text (not add_node and not update_node).
+- For insertion into the open editor, prefer mode="insert_at_cursor" unless the user explicitly asks to insert before/after a selection.
 - Use format_text(target="selection" or target="current_block") for live editor formatting changes like bold, headings, lists, quotes, and code blocks.
 - Use format_text(target="text") when you need to format matching text inside a saved text-node document.
 - Use update_node(document="...") to replace the whole document.
@@ -854,7 +856,11 @@ When you use web_search results in your response, you MUST include inline citati
 
 <deep_research_tool>
 You have a deep_research tool for thorough, multi-step web research.
-It searches the web from multiple angles, analyzes gaps, does follow-up searches, and synthesizes a structured research document with citations. It creates a note node on the canvas.
+It searches the web from multiple angles, analyzes gaps, does follow-up searches, and synthesizes a structured research document with citations. It creates a research node on the canvas.
+- The deep_research tool result also includes markdown.
+- deep_research automatically inserts its markdown into the active open text editor when one exists.
+- If no valid text editor is open, deep_research stores the result in a text node on canvas.
+- Do not issue a duplicate edit_text call for the same insertion unless the user asks for specific placement or rewriting.
 
 Use deep_research when the user asks for research, a report, deep dive, analysis, or wants to learn about a topic thoroughly. Also use it when the user asks to "create a PDF about X" — research first, then create the PDF.
 
@@ -871,7 +877,7 @@ IMPORTANT workflow — when to create a PDF:
 - If the user says "research X": do deep_research only. After research, ask if they want a PDF.
 - If the user says "make that a PDF" or "create PDF" referring to existing research: call create_pdf with the research content.
 
-Place the PDF node next to the research note (x+300 from the note node).
+Place the PDF node next to the research node (x+300 from that node).
 </create_pdf_tool>
 
 <coding_tools>

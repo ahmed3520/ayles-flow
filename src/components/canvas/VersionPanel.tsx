@@ -10,6 +10,7 @@ interface VersionPanelProps {
   projectId: Id<'projects'>
   onClose: () => void
   onRestore: () => void
+  onBeforeSaveVersion?: () => Promise<void>
 }
 
 function timeAgo(timestamp: number): string {
@@ -27,9 +28,11 @@ export default function VersionPanel({
   projectId,
   onClose,
   onRestore,
+  onBeforeSaveVersion,
 }: VersionPanelProps) {
   const [versionName, setVersionName] = useState('')
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null)
+  const [isSavingVersion, setIsSavingVersion] = useState(false)
 
   const versions = useQuery(api.versions.list, { projectId }) ?? []
   const createVersion = useMutation(api.versions.create)
@@ -38,9 +41,16 @@ export default function VersionPanel({
 
   const handleSaveVersion = async () => {
     const name = versionName.trim()
-    if (!name) return
-    await createVersion({ projectId, name })
-    setVersionName('')
+    if (!name || isSavingVersion) return
+
+    setIsSavingVersion(true)
+    try {
+      await onBeforeSaveVersion?.()
+      await createVersion({ projectId, name })
+      setVersionName('')
+    } finally {
+      setIsSavingVersion(false)
+    }
   }
 
   const handleRestore = async (versionId: Id<'versions'>) => {
@@ -84,10 +94,10 @@ export default function VersionPanel({
           />
           <button
             onClick={handleSaveVersion}
-            disabled={!versionName.trim()}
+            disabled={!versionName.trim() || isSavingVersion}
             className="px-3 py-1.5 text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
           >
-            Save
+            {isSavingVersion ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>

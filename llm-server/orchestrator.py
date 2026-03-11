@@ -231,21 +231,26 @@ def _apply_active_editor_plain_text_edit(state: VirtualState, node: dict, editor
         next_text = document_text[:text_from] + text + document_text[text_to:]
         cursor = text_from + len(text)
     elif mode == "insert_before_selection":
+        if text_from == text_to:
+            return "insert_before_selection requires a non-empty selection."
         next_text = document_text[:text_from] + text + document_text[text_from:]
         shift = len(text)
         selection["textFrom"] = text_from + shift
         selection["textTo"] = text_to + shift
+        selection["text"] = next_text[selection["textFrom"]:selection["textTo"]]
         node["documentText"] = next_text
         node["prompt"] = next_text
         editor["documentText"] = next_text
         return None
     elif mode == "insert_after_selection":
+        if text_from == text_to:
+            return "insert_after_selection requires a non-empty selection."
         next_text = document_text[:text_to] + text + document_text[text_to:]
         cursor = text_to + len(text)
     elif mode == "insert_at_cursor":
-        if text_from != text_to:
-            return "insert_at_cursor requires a collapsed cursor selection."
-        next_text = document_text[:text_from] + text + document_text[text_from:]
+        # Match the live editor bridge behavior: insert at cursor when collapsed,
+        # or replace the current selection when one exists.
+        next_text = document_text[:text_from] + text + document_text[text_to:]
         cursor = text_from + len(text)
     elif mode == "delete_selection":
         if text_from == text_to:
@@ -382,7 +387,7 @@ ORCHESTRATOR_TOOLS: list[dict] = [
     {"type": "function", "function": {"name": "update_node", "description": "Update an existing node. Use this for IDLE nodes, or for completed text nodes when editing their document content. For text documents, prefer document for full rewrites or findText + replaceText for precise edits.", "parameters": {"type": "object", "properties": {"nodeId": {"type": "string"}, "prompt": {"type": "string"}, "document": {"type": "string"}, "findText": {"type": "string"}, "replaceText": {"type": "string"}, "replaceAll": {"type": "boolean"}, "model": {"type": "string"}, "label": {"type": "string"}}, "required": ["nodeId"]}}},
     {"type": "function", "function": {"name": "delete_nodes", "description": "Delete one or more nodes and their connected edges.", "parameters": {"type": "object", "properties": {"nodeIds": {"type": "array", "items": {"type": "string"}}}, "required": ["nodeIds"]}}},
     {"type": "function", "function": {"name": "clear_canvas", "description": "Remove ALL nodes and edges from the canvas.", "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {"name": "deep_research", "description": "Perform deep multi-step web research on a topic. Creates a note node with the full document.", "parameters": {"type": "object", "properties": {"topic": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}}, "required": ["topic"]}}},
+    {"type": "function", "function": {"name": "deep_research", "description": "Perform deep multi-step web research on a topic. Returns markdown in the tool result, auto-inserts that markdown into the active open text editor when one exists, and creates a research node on canvas (text node fallback when no editor is open).", "parameters": {"type": "object", "properties": {"topic": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}}, "required": ["topic"]}}},
     {"type": "function", "function": {"name": "create_pdf", "description": "Create a PDF document from markdown content.", "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "markdown": {"type": "string"}, "sources": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}, "url": {"type": "string"}}, "required": ["title", "url"]}}, "x": {"type": "number"}, "y": {"type": "number"}}, "required": ["title", "markdown"]}}},
     {"type": "function", "function": {"name": "create_sandbox", "description": "Create an E2B sandbox for a coding project.", "parameters": {"type": "object", "properties": {"templateName": {"type": "string", "enum": ["nextjs", "nextjs-convex"]}}, "required": ["templateName"]}}},
     {"type": "function", "function": {"name": "create_project_spec", "description": "Create the project.md specification file in the sandbox. Call AFTER create_sandbox and BEFORE run_coding_agent.", "parameters": {"type": "object", "properties": {"sandboxId": {"type": "string"}, "name": {"type": "string"}, "overview": {"type": "string"}, "tech_stack": {"type": "object", "properties": {"frontend": {"type": "string"}, "backend": {"type": "string"}, "database": {"type": "string"}, "auth": {"type": "string"}, "styling": {"type": "string"}}}, "features": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}, "user_story": {"type": "string"}, "acceptance_criteria": {"type": "array", "items": {"type": "string"}}}}}, "data_models": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "fields": {"type": "array", "items": {"type": "string"}}, "relationships": {"type": "string"}}}}, "api_operations": {"type": "array", "items": {"type": "string"}}, "design_system": {"type": "object", "properties": {"colors": {"type": "object", "properties": {"primary": {"type": "string"}, "secondary": {"type": "string"}, "background": {"type": "string"}, "text": {"type": "string"}, "accent": {"type": "string"}}}, "typography": {"type": "object", "properties": {"headings": {"type": "string"}, "body": {"type": "string"}}}, "theme": {"type": "string"}, "border_radius": {"type": "string"}, "animations": {"type": "string"}}}}, "required": ["sandboxId", "name", "overview", "features"]}}},
@@ -550,7 +555,7 @@ async def _execute_tool(
     project_id: str,
     llm_model: str,
 ):
-    """Execute a tool call. Returns (result_str, action_dict_or_None, sources_or_None)."""
+    """Execute a tool call. Returns (result_str, action_or_actions_or_None, sources_or_None)."""
 
     if name == "get_canvas_state":
         return _format_canvas_state(state), None, None
@@ -845,18 +850,100 @@ async def _execute_tool(
 
             result = await deep_research(topic, llm_model, status_writer)
 
-            # Create note node
+            editor, text_node, editor_error = _get_active_text_editor_node(state, None)
+            has_active_editor = editor is not None and text_node is not None and editor_error is None
+
+            # Create a research node on canvas:
+            # - With active editor: keep a lightweight note node + insert into editor.
+            # - No active editor: use a text node fallback so content is editor-compatible.
+            research_node_type = "note" if has_active_editor else "text"
             node_id = f"node-{state.next_node_id}"
             state.next_node_id += 1
             last = state.nodes[-1] if state.nodes else None
             x = args.get("x") or (last["x"] + 300 if last else 100)
             y = args.get("y") or (last["y"] if last else 100)
 
-            node = {"id": node_id, "contentType": "note", "label": result["title"], "prompt": result["markdown"], "model": "", "generationStatus": "idle", "x": x, "y": y}
+            node = {
+                "id": node_id,
+                "contentType": research_node_type,
+                "label": result["title"],
+                "prompt": result["markdown"],
+                "model": "",
+                "generationStatus": "completed" if research_node_type == "text" else "idle",
+                "x": x,
+                "y": y,
+            }
+            if research_node_type == "text":
+                node["document"] = result["markdown"]
+                node["documentText"] = _plain_text(result["markdown"])
             state.nodes.append(node)
 
-            action = {"type": "add_node", "nodeId": node_id, "contentType": "note", "prompt": result["markdown"], "label": result["title"], "x": x, "y": y}
-            return json.dumps({"success": True, "noteNodeId": node_id, "title": result["title"], "summary": result["summary"], "sourceCount": len(result["sources"]), "markdown": result["markdown"]}), action, result["sources"] if result["sources"] else None
+            actions: list[dict] = [
+                {
+                    "type": "add_node",
+                    "nodeId": node_id,
+                    "contentType": research_node_type,
+                    "prompt": result["markdown"],
+                    **(
+                        {
+                            "generationStatus": "completed",
+                            "resultText": result["markdown"],
+                        }
+                        if research_node_type == "text"
+                        else {}
+                    ),
+                    "label": result["title"],
+                    "x": x,
+                    "y": y,
+                },
+            ]
+
+            inserted_into_active_editor = False
+            active_editor_insert_error: Optional[str] = None
+
+            if not has_active_editor:
+                if state.active_text_editor:
+                    active_editor_insert_error = editor_error
+            elif editor and text_node:
+                edit_error = _apply_active_editor_plain_text_edit(
+                    state,
+                    text_node,
+                    editor,
+                    "insert_at_cursor",
+                    result["markdown"],
+                )
+                if edit_error:
+                    active_editor_insert_error = edit_error
+                else:
+                    inserted_into_active_editor = True
+                    actions.append(
+                        {
+                            "type": "edit_text_node",
+                            "nodeId": text_node["id"],
+                            "mode": "insert_at_cursor",
+                            "text": result["markdown"],
+                        }
+                    )
+
+            response_payload = {
+                "success": True,
+                "noteNodeId": node_id,
+                "researchNodeId": node_id,
+                "researchNodeType": research_node_type,
+                "title": result["title"],
+                "summary": result["summary"],
+                "sourceCount": len(result["sources"]),
+                "markdown": result["markdown"],
+                "insertedIntoActiveEditor": inserted_into_active_editor,
+            }
+            if active_editor_insert_error:
+                response_payload["activeEditorInsertError"] = active_editor_insert_error
+
+            return (
+                json.dumps(response_payload),
+                actions,
+                result["sources"] if result["sources"] else None,
+            )
         except Exception as e:
             return json.dumps({"error": str(e)}), None, None
 
@@ -1151,7 +1238,11 @@ async def _agent_event_stream(req: AgentChatRequest):
                 yield evt
 
                 if action:
-                    yield {"type": "action", "action": action}
+                    if isinstance(action, list):
+                        for single_action in action:
+                            yield {"type": "action", "action": single_action}
+                    else:
+                        yield {"type": "action", "action": action}
                 if sources:
                     yield {"type": "resources", "sources": sources}
 
@@ -1413,6 +1504,8 @@ Text nodes can contain full editor documents, not just prompts.
 - Never use search_text with broad patterns like `.*` to dump a whole document. Use read_text instead.
 - Use read_text to fetch the full plain-text content of a text node or the open editor on demand.
 - Use edit_text for live selection-aware or cursor-aware edits in the open Tiptap editor.
+- If the user asks to add/insert/append content into the open text editor, use edit_text (not add_node and not update_node).
+- For insertion into the open editor, prefer mode="insert_at_cursor" unless the user explicitly asks to insert before/after a selection.
 - Use format_text(target="selection" or target="current_block") for live editor formatting changes like bold, headings, lists, quotes, and code blocks.
 - Use format_text(target="text") when you need to format matching text inside a saved text-node document.
 - Use update_node(document="...") to replace the whole document.
@@ -1485,7 +1578,7 @@ Generate multiple variations of the same source image by fanning out.
 4. Node IDs: new nodes get IDs automatically. Only reference existing node IDs.
 5. Explain briefly: tell the user what you're doing and why.
 6. Ask when unclear: if ambiguous, ask before acting.
-7. Editing = new node: ALWAYS create a new downstream node. NEVER update_node on completed.
+7. Editing = new node for completed media outputs: when the user wants to modify/edit/restyle/vary a completed image/video/audio/music/pdf result, ALWAYS create a new downstream node with the appropriate input model and connect it. Exception: completed text nodes can be edited in place with update_node, and open-editor changes should use edit_text.
 8. Check for results: verify source has a result before connecting.
 9. Pick image-to-image models for edits.
 10. Use text-to-image models ONLY for fresh generations.
@@ -1496,7 +1589,11 @@ You have web_search for real-time information. Use when needed. Include inline c
 </web_tools>
 
 <deep_research_tool>
-You have deep_research for thorough multi-step web research. Creates a note node.
+You have deep_research for thorough multi-step web research. Creates a research node on canvas.
+- deep_research also returns markdown in the tool result.
+- deep_research automatically inserts its markdown into the active open text editor when one exists.
+- If no valid text editor is open, deep_research stores the result in a text node on canvas.
+- Do not issue a duplicate edit_text call for the same insertion unless the user asks for a specific placement or rewrite.
 </deep_research_tool>
 
 <create_pdf_tool>

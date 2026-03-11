@@ -1,10 +1,13 @@
 import {
   Bold,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Code,
   Download,
   Heading1,
   Heading2,
+  History,
   ImagePlus,
   Italic,
   List,
@@ -12,6 +15,8 @@ import {
   Loader2,
   Minus,
   Redo2,
+  RotateCcw,
+  Save,
   Sparkles,
   SquarePen,
   TextQuote,
@@ -19,6 +24,10 @@ import {
   X,
 } from 'lucide-react'
 import Placeholder from '@tiptap/extension-placeholder'
+import Table from '@tiptap/extension-table'
+import TableCell from '@tiptap/extension-table-cell'
+import TableHeader from '@tiptap/extension-table-header'
+import TableRow from '@tiptap/extension-table-row'
 import { Node as TiptapNode, mergeAttributes } from '@tiptap/core'
 import {
   EditorContent,
@@ -62,7 +71,7 @@ type ToolbarButtonProps = {
   disabled?: boolean
   icon: ComponentType<ToolbarButtonIconProps>
   label: string
-  onClick: () => void
+  onClick: NonNullable<ComponentProps<'button'>['onClick']>
 }
 
 type SlashMenuState = {
@@ -96,6 +105,9 @@ type PendingTextHelper = {
   actionLabel: string
   generationId: Id<'generations'>
   range: { from: number; to: number }
+  anchorX: number
+  anchorTop: number
+  anchorBottom: number
 }
 
 type PendingMediaGeneration = {
@@ -104,9 +116,26 @@ type PendingMediaGeneration = {
   prompt: string
 }
 
+type TextDocumentVersion = {
+  _id: Id<'versions'>
+  createdAt: number
+  name: string
+  previewText: string
+  document: string
+}
+
+type MediaComposerAnchor = {
+  source: 'toolbar' | 'slash-menu' | 'selection-menu'
+  x: number
+  y: number
+  align: 'start' | 'center' | 'end'
+}
+
 type SaveStatus = 'saved' | 'saving' | 'unsaved'
 type RichTextEditor = NonNullable<ReturnType<typeof useEditor>>
 const SELECTION_MENU_DELAY_MS = 180
+const AUTO_TEXT_VERSION_IDLE_MS = 45_000
+const AUTO_TEXT_VERSION_MIN_GAP_MS = 120_000
 
 type TextEditorWorkspaceProps = {
   agentPanelProps: Omit<
@@ -115,6 +144,7 @@ type TextEditorWorkspaceProps = {
   >
   node: Node<BlockNodeData> | null
   onClose: () => void
+  projectId: Id<'projects'>
   onEditorContextChange?: (state: ActiveTextEditorState | null) => void
   onRegisterAgentBridge?: (bridge: AgentTextEditorBridge | null) => void
   onUpdateDocument: (value: string) => void
@@ -346,6 +376,28 @@ function choosePreferredModel(
   return models[0]?.falId ?? ''
 }
 
+function timeAgo(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000)
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+function formatVersionTimestamp(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(timestamp)
+}
+
+function getVersionSource(name: string): 'auto' | 'manual' {
+  return /^auto\b/i.test(name) ? 'auto' : 'manual'
+}
+
 function getEditorDocumentText(editor: RichTextEditor): string {
   return editor.getText({ blockSeparator: '\n\n' })
 }
@@ -398,6 +450,7 @@ export default function TextEditorWorkspace({
   agentPanelProps,
   node,
   onClose,
+  projectId,
   onEditorContextChange,
   onRegisterAgentBridge,
   onUpdateDocument,
@@ -406,8 +459,16 @@ export default function TextEditorWorkspace({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editorScrollRef = useRef<HTMLDivElement>(null)
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const textVersionsMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const selectionMenuRef = useRef<HTMLDivElement>(null)
+  const mediaComposerRef = useRef<HTMLDivElement>(null)
+  const mediaComposerOpenedAtRef = useRef(0)
+  const autoTextVersionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
+  const lastAutoTextVersionAtRef = useRef(0)
+  const lastAutoVersionDocumentRef = useRef('')
   const selectionMenuTimerRef = useRef<number | null>(null)
   const selectionMenuStateRef = useRef<SelectionMenuState | null>(null)
   const activeNodeIdRef = useRef<string | null>(null)
@@ -418,12 +479,24 @@ export default function TextEditorWorkspace({
   const createGeneration = useMutation(api.generations.create)
   const setFalRequestId = useMutation(api.generations.setFalRequestId)
   const submitTextGeneration = useAction(api.textGeneration.submit)
+  const createTextNodeVersion = useMutation(api.versions.createTextNodeVersion)
+  const restoreTextNodeVersion = useMutation(api.versions.restoreTextNodeVersion)
   const imageModels = useQuery(api.models.listByContentType, {
     contentType: 'image',
   })
   const textModels = useQuery(api.models.listByContentType, {
     contentType: 'text',
   })
+  const textVersionsResult = useQuery(
+    api.versions.listTextNodeVersions,
+    node ? { projectId, nodeId: node.id } : 'skip',
+  ) as Array<TextDocumentVersion> | undefined
+  const textVersions = textVersionsResult ?? []
+  const isLoadingTextVersions = Boolean(node) && textVersionsResult === undefined
+  const orderedTextVersions = useMemo(
+    () => [...textVersions].reverse(),
+    [textVersions],
+  )
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null)
   const [slashMenuHeight, setSlashMenuHeight] = useState(0)
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenuState | null>(
@@ -431,11 +504,25 @@ export default function TextEditorWorkspace({
   )
   const [selectionMenuHeight, setSelectionMenuHeight] = useState(0)
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [showTextVersionsMenu, setShowTextVersionsMenu] = useState(false)
+  const [textVersionName, setTextVersionName] = useState('')
+  const [isSavingTextVersion, setIsSavingTextVersion] = useState(false)
+  const [restoringTextVersionId, setRestoringTextVersionId] = useState<
+    Id<'versions'> | null
+  >(null)
+  const [selectedTextVersionIndex, setSelectedTextVersionIndex] = useState(0)
+  const [confirmRestoreVersionId, setConfirmRestoreVersionId] = useState<
+    Id<'versions'> | null
+  >(null)
   const [exportingFormat, setExportingFormat] = useState<TextExportFormat | null>(
     null,
   )
   const [exportError, setExportError] = useState<string | null>(null)
+  const [textVersionError, setTextVersionError] = useState<string | null>(null)
   const [showMediaComposer, setShowMediaComposer] = useState(false)
+  const [mediaComposerAnchor, setMediaComposerAnchor] =
+    useState<MediaComposerAnchor | null>(null)
+  const [mediaComposerHeight, setMediaComposerHeight] = useState(0)
   const [mediaPrompt, setMediaPrompt] = useState('')
   const [selectedImageModelId, setSelectedImageModelId] = useState('')
   const [mediaError, setMediaError] = useState<string | null>(null)
@@ -452,6 +539,13 @@ export default function TextEditorWorkspace({
     ) {
       window.clearTimeout(selectionMenuTimerRef.current)
       selectionMenuTimerRef.current = null
+    }
+  }, [])
+
+  const clearAutoTextVersionTimer = useCallback(() => {
+    if (autoTextVersionTimerRef.current) {
+      clearTimeout(autoTextVersionTimerRef.current)
+      autoTextVersionTimerRef.current = null
     }
   }, [])
 
@@ -632,6 +726,12 @@ export default function TextEditorWorkspace({
           newGroupDelay: 300,
         },
       }),
+      Table.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
       RichImage,
       Placeholder.configure({
         placeholder: 'Start writing...',
@@ -654,7 +754,7 @@ export default function TextEditorWorkspace({
     editorProps: {
       attributes: {
         class:
-          'nodrag nowheel dark-scrollbar min-h-[calc(100vh-15rem)] w-full outline-none px-8 py-10 text-[16px] leading-8 text-zinc-300 caret-zinc-100 selection:bg-zinc-700 selection:text-zinc-50 sm:px-12 sm:py-12 [&_.is-editor-empty:first-child::before]:pointer-events-none [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:text-zinc-500 [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_a]:text-blue-400 [&_a]:underline [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-700 [&_blockquote]:pl-3 [&_blockquote]:italic [&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_h1]:mt-6 [&_h1]:mb-2 [&_h1]:text-[1.9rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[1.45rem] [&_h2]:leading-tight [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[1.1rem] [&_h3]:font-semibold [&_hr]:my-5 [&_hr]:border-zinc-800 [&_li]:my-1 [&_ol]:my-3 [&_ol]:pl-6 [&_p]:my-2.5 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-3 [&_strong]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6',
+          'nodrag nowheel dark-scrollbar min-h-[calc(100vh-15rem)] w-full outline-none px-8 py-10 text-[16px] leading-8 text-zinc-300 caret-zinc-100 selection:bg-zinc-700 selection:text-zinc-50 sm:px-12 sm:py-12 [&_.is-editor-empty:first-child::before]:pointer-events-none [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:text-zinc-500 [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.selectedCell]:bg-zinc-700/35 [&_a]:text-blue-400 [&_a]:underline [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-700 [&_blockquote]:pl-3 [&_blockquote]:italic [&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_h1]:mt-6 [&_h1]:mb-2 [&_h1]:text-[1.9rem] [&_h1]:leading-tight [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[1.45rem] [&_h2]:leading-tight [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[1.1rem] [&_h3]:font-semibold [&_hr]:my-5 [&_hr]:border-zinc-800 [&_li]:my-1 [&_ol]:my-3 [&_ol]:pl-6 [&_p]:my-2.5 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-zinc-950 [&_pre]:p-3 [&_strong]:font-semibold [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-zinc-800 [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-zinc-700 [&_th]:bg-zinc-900 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6',
       },
     },
   })
@@ -671,13 +771,13 @@ export default function TextEditorWorkspace({
           if (!content || empty) return false
           return editor.chain().focus().insertContent(content).run()
         case 'insert_before_selection':
-          if (!content) return false
+          if (!content || empty) return false
           return editor.chain().focus().insertContentAt(from, content).run()
         case 'insert_after_selection':
-          if (!content) return false
+          if (!content || empty) return false
           return editor.chain().focus().insertContentAt(to, content).run()
         case 'insert_at_cursor':
-          if (!content || !empty) return false
+          if (!content) return false
           return editor.chain().focus().insertContent(content).run()
         case 'delete_selection':
           if (empty) return false
@@ -733,6 +833,31 @@ export default function TextEditorWorkspace({
       }
     },
     [editor, node],
+  )
+
+  const closeMediaComposer = useCallback(() => {
+    setShowMediaComposer(false)
+    setMediaComposerAnchor(null)
+  }, [])
+
+  const openMediaComposer = useCallback(
+    ({
+      prompt,
+      anchor,
+    }: {
+      prompt?: string
+      anchor?: MediaComposerAnchor | null
+    } = {}) => {
+      setMediaError(null)
+      mediaComposerOpenedAtRef.current =
+        typeof performance !== 'undefined' ? performance.now() : 0
+      setShowMediaComposer(true)
+      setMediaComposerAnchor(anchor ?? null)
+      if (prompt !== undefined) {
+        setMediaPrompt(prompt.trim())
+      }
+    },
+    [],
   )
 
   const runSlashCommand = useCallback(
@@ -814,8 +939,14 @@ export default function TextEditorWorkspace({
           break
         case 'image-generate':
           editor.chain().focus().deleteRange(slashMenu.range).run()
-          setShowMediaComposer(true)
-          setMediaError(null)
+          openMediaComposer({
+            anchor: {
+              source: 'slash-menu',
+              x: slashMenu.x,
+              y: slashMenu.caretBottom,
+              align: 'center',
+            },
+          })
           break
         case 'image-upload':
           editor.chain().focus().deleteRange(slashMenu.range).run()
@@ -827,16 +958,8 @@ export default function TextEditorWorkspace({
 
       setSlashMenu(null)
     },
-    [editor, slashMenu],
+    [editor, openMediaComposer, slashMenu],
   )
-
-  const openMediaComposer = useCallback((prompt?: string) => {
-    setMediaError(null)
-    setShowMediaComposer(true)
-    if (prompt !== undefined) {
-      setMediaPrompt(prompt.trim())
-    }
-  }, [])
 
   const runTextHelper = useCallback(
     async (actionId: SelectionHelperAction['id']) => {
@@ -862,6 +985,9 @@ export default function TextEditorWorkspace({
           actionLabel,
           generationId,
           range: selectionMenu.range,
+          anchorX: selectionMenu.x,
+          anchorTop: selectionMenu.selectionTop,
+          anchorBottom: selectionMenu.selectionBottom,
         })
 
         await submitTextGeneration({ generationId })
@@ -954,6 +1080,136 @@ export default function TextEditorWorkspace({
     [editor, node],
   )
 
+  const handleSaveTextVersion = useCallback(
+    async (mode: 'manual' | 'auto' = 'manual') => {
+      if (!editor || !node || (mode === 'manual' && isSavingTextVersion)) return
+
+      clearAutoTextVersionTimer()
+      const document = editor.getHTML()
+      const hasContent = Boolean(editor.getText({ blockSeparator: '\n\n' }).trim())
+      if (!hasContent) return
+
+      const now = Date.now()
+      const name =
+        mode === 'manual'
+          ? textVersionName.trim() || `Snapshot ${new Date(now).toLocaleString()}`
+          : `Auto ${new Date(now).toLocaleString()}`
+
+      if (mode === 'manual') {
+        setTextVersionError(null)
+        setIsSavingTextVersion(true)
+      }
+
+      try {
+        await createTextNodeVersion({
+          projectId,
+          nodeId: node.id,
+          name,
+          document,
+        })
+        onUpdateDocumentRef.current(document)
+        lastAutoTextVersionAtRef.current = now
+        lastAutoVersionDocumentRef.current = document
+
+        if (mode === 'manual') {
+          setTextVersionName('')
+          setShowTextVersionsMenu(true)
+        }
+      } catch (error) {
+        if (mode === 'manual') {
+          setTextVersionError(
+            error instanceof Error ? error.message : 'Failed to save text version',
+          )
+        } else {
+          console.error('Auto text version save failed', error)
+        }
+      } finally {
+        if (mode === 'manual') {
+          setIsSavingTextVersion(false)
+        }
+      }
+    },
+    [
+      createTextNodeVersion,
+      clearAutoTextVersionTimer,
+      editor,
+      isSavingTextVersion,
+      node,
+      projectId,
+      textVersionName,
+    ],
+  )
+
+  const handleRestoreTextVersion = useCallback(
+    async (version: TextDocumentVersion) => {
+      if (!editor || !node || restoringTextVersionId) return
+
+      setTextVersionError(null)
+      setRestoringTextVersionId(version._id)
+      try {
+        const result = await restoreTextNodeVersion({
+          projectId,
+          versionId: version._id,
+          nodeId: node.id,
+        })
+
+        const restoredDocument =
+          typeof result.document === 'string' ? result.document : version.document
+        lastPublishedHtmlRef.current = restoredDocument
+        editor.commands.setContent(restoredDocument || '<p></p>', {
+          emitUpdate: false,
+        })
+        onUpdateDocumentRef.current(restoredDocument)
+        lastAutoTextVersionAtRef.current = Date.now()
+        lastAutoVersionDocumentRef.current = restoredDocument
+        setConfirmRestoreVersionId(null)
+        publishEditorContext(editor)
+      } catch (error) {
+        setTextVersionError(
+          error instanceof Error
+            ? error.message
+            : 'Failed to restore text version',
+        )
+      } finally {
+        setRestoringTextVersionId(null)
+      }
+    },
+    [
+      editor,
+      node,
+      projectId,
+      publishEditorContext,
+      restoreTextNodeVersion,
+      restoringTextVersionId,
+    ],
+  )
+
+  const handleRestoreSelectedTextVersion = useCallback(() => {
+    const selectedVersion = orderedTextVersions[selectedTextVersionIndex]
+
+    if (confirmRestoreVersionId !== selectedVersion._id) {
+      setConfirmRestoreVersionId(selectedVersion._id)
+      return
+    }
+
+    void handleRestoreTextVersion(selectedVersion)
+  }, [
+    confirmRestoreVersionId,
+    handleRestoreTextVersion,
+    orderedTextVersions,
+    selectedTextVersionIndex,
+  ])
+
+  const selectPreviousTextVersion = useCallback(() => {
+    setSelectedTextVersionIndex((current) => Math.max(current - 1, 0))
+  }, [])
+
+  const selectNextTextVersion = useCallback(() => {
+    setSelectedTextVersionIndex((current) =>
+      Math.min(current + 1, Math.max(orderedTextVersions.length - 1, 0)),
+    )
+  }, [orderedTextVersions.length])
+
   const filteredSlashCommands = useMemo(() => {
     const query = (slashMenu ? slashMenu.query : '').trim()
     if (!query) return SLASH_COMMANDS
@@ -963,6 +1219,61 @@ export default function TextEditorWorkspace({
       return haystack.includes(query)
     })
   }, [slashMenu?.query])
+
+  useEffect(() => {
+    if (orderedTextVersions.length === 0) {
+      setSelectedTextVersionIndex(0)
+      setConfirmRestoreVersionId(null)
+      return
+    }
+
+    setSelectedTextVersionIndex((current) =>
+      Math.min(current, orderedTextVersions.length - 1),
+    )
+  }, [orderedTextVersions.length])
+
+  useEffect(() => {
+    setConfirmRestoreVersionId(null)
+  }, [selectedTextVersionIndex])
+
+  useEffect(() => {
+    clearAutoTextVersionTimer()
+    if (!node || node.data.contentType !== 'text') return
+
+    const currentDocument = node.data.resultText ?? node.data.prompt
+    lastAutoVersionDocumentRef.current = currentDocument
+    lastAutoTextVersionAtRef.current = Date.now()
+  }, [clearAutoTextVersionTimer, node?.id])
+
+  useEffect(() => {
+    if (!editor || !node) return
+    if (restoringTextVersionId || pendingTextHelper) return
+
+    const currentDocument = editor.getHTML()
+    if (currentDocument === lastAutoVersionDocumentRef.current) return
+
+    clearAutoTextVersionTimer()
+
+    const elapsedSinceLastAuto = Date.now() - lastAutoTextVersionAtRef.current
+    const delay = Math.max(
+      AUTO_TEXT_VERSION_IDLE_MS,
+      AUTO_TEXT_VERSION_MIN_GAP_MS - elapsedSinceLastAuto,
+    )
+
+    autoTextVersionTimerRef.current = setTimeout(() => {
+      void handleSaveTextVersion('auto')
+    }, delay)
+
+    return clearAutoTextVersionTimer
+  }, [
+    clearAutoTextVersionTimer,
+    editor,
+    handleSaveTextVersion,
+    node,
+    pendingTextHelper,
+    restoringTextVersionId,
+    value,
+  ])
 
   useEffect(() => {
     if (!node) return
@@ -977,8 +1288,12 @@ export default function TextEditorWorkspace({
           setShowExportMenu(false)
           return
         }
+        if (showTextVersionsMenu) {
+          setShowTextVersionsMenu(false)
+          return
+        }
         if (showMediaComposer) {
-          setShowMediaComposer(false)
+          closeMediaComposer()
           return
         }
         onClose()
@@ -1001,11 +1316,13 @@ export default function TextEditorWorkspace({
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [
+    closeMediaComposer,
     node,
     onClose,
     filteredSlashCommands,
     runSlashCommand,
     showExportMenu,
+    showTextVersionsMenu,
     showMediaComposer,
     slashMenu,
   ])
@@ -1028,6 +1345,48 @@ export default function TextEditorWorkspace({
     window.addEventListener('mousedown', handlePointerDown)
     return () => window.removeEventListener('mousedown', handlePointerDown)
   }, [showExportMenu])
+
+  useEffect(() => {
+    if (!showTextVersionsMenu) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) {
+        setShowTextVersionsMenu(false)
+        return
+      }
+
+      if (!textVersionsMenuRef.current?.contains(target)) {
+        setShowTextVersionsMenu(false)
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    return () => window.removeEventListener('mousedown', handlePointerDown)
+  }, [showTextVersionsMenu])
+
+  useEffect(() => {
+    if (!showMediaComposer) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.timeStamp - mediaComposerOpenedAtRef.current < 140) {
+        return
+      }
+
+      const target = event.target
+      if (!(target instanceof Element)) {
+        closeMediaComposer()
+        return
+      }
+
+      if (!mediaComposerRef.current?.contains(target)) {
+        closeMediaComposer()
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    return () => window.removeEventListener('pointerdown', handlePointerDown)
+  }, [closeMediaComposer, showMediaComposer])
 
   useEffect(() => {
     if (!slashMenu) {
@@ -1078,6 +1437,31 @@ export default function TextEditorWorkspace({
 
     return () => observer.disconnect()
   }, [selectionMenu])
+
+  useEffect(() => {
+    if (!showMediaComposer) {
+      setMediaComposerHeight(0)
+      return
+    }
+
+    const composerElement = mediaComposerRef.current
+    if (!composerElement) return
+
+    const updateHeight = () => {
+      setMediaComposerHeight(composerElement.getBoundingClientRect().height)
+    }
+
+    updateHeight()
+
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(updateHeight)
+    observer.observe(composerElement)
+
+    return () => observer.disconnect()
+  }, [showMediaComposer])
 
   useEffect(() => {
     selectionMenuStateRef.current = selectionMenu
@@ -1201,7 +1585,7 @@ export default function TextEditorWorkspace({
 
       setPendingMediaGeneration(null)
       setMediaError(null)
-      setShowMediaComposer(false)
+      closeMediaComposer()
       return
     }
 
@@ -1209,7 +1593,7 @@ export default function TextEditorWorkspace({
       setPendingMediaGeneration(null)
       setMediaError(mediaGeneration.errorMessage || 'Image generation failed')
     }
-  }, [editor, mediaGeneration, pendingMediaGeneration])
+  }, [closeMediaComposer, editor, mediaGeneration, pendingMediaGeneration])
 
   useEffect(() => {
     if (!editor || !node) return
@@ -1225,10 +1609,16 @@ export default function TextEditorWorkspace({
         emitUpdate: false,
       })
       setShowExportMenu(false)
+      setShowTextVersionsMenu(false)
+      setTextVersionName('')
+      setSelectedTextVersionIndex(0)
+      setConfirmRestoreVersionId(null)
       setSlashMenu(null)
       setSelectionMenu(null)
       setExportError(null)
-      setShowMediaComposer(false)
+      setTextVersionError(null)
+      setRestoringTextVersionId(null)
+      closeMediaComposer()
       setMediaError(null)
       setHelperError(null)
       setPendingMediaGeneration(null)
@@ -1249,7 +1639,7 @@ export default function TextEditorWorkspace({
       })
       publishEditorContext(editor)
     }
-  }, [editor, node, publishEditorContext, value])
+  }, [closeMediaComposer, editor, node, publishEditorContext, value])
 
   useEffect(() => {
     if (!editor || !node) return
@@ -1258,11 +1648,17 @@ export default function TextEditorWorkspace({
 
   useEffect(() => {
     return () => {
+      clearAutoTextVersionTimer()
       clearPendingSelectionMenu()
       onEditorContextChange?.(null)
       onRegisterAgentBridge?.(null)
     }
-  }, [clearPendingSelectionMenu, onEditorContextChange, onRegisterAgentBridge])
+  }, [
+    clearAutoTextVersionTimer,
+    clearPendingSelectionMenu,
+    onEditorContextChange,
+    onRegisterAgentBridge,
+  ])
 
   const handleImageUpload = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1297,6 +1693,12 @@ export default function TextEditorWorkspace({
     return null
   }
 
+  const selectedTextVersion =
+    orderedTextVersions[selectedTextVersionIndex] ?? null
+  const totalTextVersions = orderedTextVersions.length
+  const canMoveToOlderVersion = selectedTextVersionIndex > 0
+  const canMoveToNewerVersion =
+    selectedTextVersionIndex < Math.max(totalTextVersions - 1, 0)
   const plainText = editor?.getText({ blockSeparator: '\n\n' }).trim() || ''
   const wordCount = plainText
     ? plainText.split(/\s+/).filter(Boolean).length
@@ -1377,6 +1779,64 @@ export default function TextEditorWorkspace({
           selectionMenu.selectionTop - estimatedSelectionMenuHeight - 10,
         )
     : 0
+  const helperStatusWidth = 248
+  const helperStatusLeft = pendingTextHelper
+    ? Math.max(
+        12,
+        Math.min(
+          pendingTextHelper.anchorX - helperStatusWidth / 2,
+          window.innerWidth - helperStatusWidth - 12,
+        ),
+      )
+    : 0
+  const helperStatusHeight = 44
+  const helperStatusSpaceAbove = pendingTextHelper
+    ? pendingTextHelper.anchorTop - 12
+    : 0
+  const helperStatusSpaceBelow = pendingTextHelper
+    ? window.innerHeight - pendingTextHelper.anchorBottom - 12
+    : 0
+  const shouldPlaceHelperStatusBelow = pendingTextHelper
+    ? helperStatusSpaceAbove < helperStatusHeight + 8 &&
+      helperStatusSpaceBelow > helperStatusSpaceAbove
+    : false
+  const helperStatusTop = pendingTextHelper
+    ? shouldPlaceHelperStatusBelow
+      ? Math.min(
+          window.innerHeight - helperStatusHeight - 12,
+          pendingTextHelper.anchorBottom + 10,
+        )
+      : Math.max(12, pendingTextHelper.anchorTop - helperStatusHeight - 10)
+    : 0
+  const mediaComposerWidth = Math.min(448, window.innerWidth - 24)
+  const mediaComposerAnchorX = mediaComposerAnchor?.x ?? window.innerWidth - 24
+  const mediaComposerAnchorY = mediaComposerAnchor?.y ?? 128
+  const mediaComposerAnchorAlign = mediaComposerAnchor?.align ?? 'end'
+  const mediaComposerRawLeft =
+    mediaComposerAnchorAlign === 'center'
+      ? mediaComposerAnchorX - mediaComposerWidth / 2
+      : mediaComposerAnchorAlign === 'start'
+        ? mediaComposerAnchorX
+        : mediaComposerAnchorX - mediaComposerWidth
+  const mediaComposerLeft = Math.max(
+    12,
+    Math.min(mediaComposerRawLeft, window.innerWidth - mediaComposerWidth - 12),
+  )
+  const estimatedMediaComposerHeight = mediaComposerHeight || 380
+  const mediaComposerSpaceAbove = mediaComposerAnchorY - 12
+  const mediaComposerSpaceBelow = window.innerHeight - mediaComposerAnchorY - 12
+  const shouldPlaceMediaComposerAbove =
+    mediaComposerSpaceBelow < estimatedMediaComposerHeight + 8 &&
+    mediaComposerSpaceAbove > mediaComposerSpaceBelow
+  const mediaComposerTop = shouldPlaceMediaComposerAbove
+    ? Math.max(12, mediaComposerAnchorY - estimatedMediaComposerHeight - 8)
+    : Math.max(
+        12,
+        Math.min(
+          window.innerHeight - estimatedMediaComposerHeight - 12,
+          mediaComposerAnchorY + 8,
+        ),
+      )
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] bg-zinc-900">
@@ -1492,6 +1952,291 @@ export default function TextEditorWorkspace({
                   </div>
                 )}
               </div>
+              <div ref={textVersionsMenuRef} className="relative">
+                <button
+                  type="button"
+                  className={`inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm transition-colors ${
+                    showTextVersionsMenu
+                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                      : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100'
+                  }`}
+                  onClick={() => {
+                    setTextVersionError(null)
+                    setShowTextVersionsMenu((current) => {
+                      const next = !current
+                      if (next) {
+                        const latestIndex = Math.max(
+                          orderedTextVersions.length - 1,
+                          0,
+                        )
+                        setSelectedTextVersionIndex(latestIndex)
+                        setConfirmRestoreVersionId(null)
+                      }
+                      return next
+                    })
+                  }}
+                  disabled={!editor}
+                  title="Text document versions"
+                >
+                  <History size={14} strokeWidth={1.8} />
+                  <span>Text Versions</span>
+                  <span className="rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] leading-none text-zinc-400">
+                    {totalTextVersions}
+                  </span>
+                </button>
+                {showTextVersionsMenu && (
+                  <div className="absolute top-full right-0 z-30 mt-2 w-[26rem] overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-900 shadow-[0_2px_10px_rgba(0,0,0,0.45)]">
+                    <div className="flex items-center justify-between border-b border-zinc-800/60 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                        Text Versions
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        {isLoadingTextVersions
+                          ? 'Loading...'
+                          : `${totalTextVersions} revision${totalTextVersions === 1 ? '' : 's'}`}
+                      </div>
+                    </div>
+                    <div className="border-b border-zinc-800/60 px-3 py-3">
+                      <div className="mb-2 text-[11px] text-zinc-500">
+                        Save a named snapshot or restore any previous revision.
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={textVersionName}
+                          onChange={(event) =>
+                            setTextVersionName(event.target.value)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault()
+                              void handleSaveTextVersion()
+                            }
+                          }}
+                          placeholder="Name this snapshot..."
+                          className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-500 focus:border-zinc-500"
+                          disabled={isSavingTextVersion}
+                        />
+                        <button
+                          type="button"
+                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-white px-2.5 py-2 text-xs font-medium text-zinc-900 transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => void handleSaveTextVersion()}
+                          disabled={isSavingTextVersion || isLoadingTextVersions}
+                        >
+                          {isSavingTextVersion ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <Save size={12} strokeWidth={1.8} />
+                          )}
+                          <span>{isSavingTextVersion ? 'Saving' : 'Save'}</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="p-2">
+                      {isLoadingTextVersions ? (
+                        <div className="flex items-center justify-center gap-2 rounded-lg border border-zinc-800/60 bg-zinc-950 px-3 py-6 text-sm text-zinc-400">
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Loading versions...</span>
+                        </div>
+                      ) : orderedTextVersions.length === 0 ? (
+                        <div className="space-y-2">
+                          <div className="rounded-lg border border-zinc-800/60 bg-zinc-950 px-2.5 py-2">
+                            <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                              <span>Oldest</span>
+                              <span>0/0</span>
+                              <span>Newest</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={0}
+                              value={0}
+                              disabled
+                              className="h-1.5 w-full cursor-not-allowed opacity-45 accent-zinc-200"
+                            />
+                          </div>
+                          <div className="rounded-lg border border-zinc-800/60 bg-zinc-950 px-3 py-4 text-center">
+                            <p className="text-xs text-zinc-500">
+                              No text versions yet.
+                            </p>
+                            <p className="mt-1 text-[11px] text-zinc-600">
+                              Save a snapshot or keep editing to create auto
+                              revisions.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="rounded-lg border border-zinc-800/60 bg-zinc-950 px-2.5 py-2">
+                            <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-35"
+                                onClick={selectPreviousTextVersion}
+                                disabled={!canMoveToOlderVersion}
+                                title="Select older revision"
+                              >
+                                <ChevronLeft size={11} strokeWidth={2} />
+                                <span>Older</span>
+                              </button>
+                              <span>
+                                {selectedTextVersionIndex + 1}/{totalTextVersions}
+                              </span>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-35"
+                                onClick={selectNextTextVersion}
+                                disabled={!canMoveToNewerVersion}
+                                title="Select newer revision"
+                              >
+                                <span>Newer</span>
+                                <ChevronRight size={11} strokeWidth={2} />
+                              </button>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={Math.max(totalTextVersions - 1, 0)}
+                              value={selectedTextVersionIndex}
+                              onChange={(event) =>
+                                setSelectedTextVersionIndex(
+                                  Number(event.target.value),
+                                )
+                              }
+                              disabled={totalTextVersions < 2}
+                              className={`h-1.5 w-full accent-zinc-200 ${
+                                totalTextVersions < 2
+                                  ? 'cursor-not-allowed opacity-45'
+                                  : 'cursor-pointer'
+                              }`}
+                            />
+                            <div className="mt-1.5 flex items-center justify-between text-[10px] text-zinc-600">
+                              <span className="max-w-[42%] truncate">
+                                {orderedTextVersions[0].name}
+                              </span>
+                              <span className="max-w-[42%] truncate text-right">
+                                {orderedTextVersions[totalTextVersions - 1].name}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="rounded-lg border border-zinc-800/60 bg-zinc-950 px-2.5 py-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="mb-1 inline-flex items-center gap-1.5">
+                                  <span
+                                    className={`rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] ${
+                                      getVersionSource(selectedTextVersion.name) ===
+                                      'auto'
+                                        ? 'border border-sky-700/50 bg-sky-500/15 text-sky-300'
+                                        : 'border border-zinc-700 bg-zinc-800 text-zinc-300'
+                                    }`}
+                                  >
+                                    {getVersionSource(selectedTextVersion.name)}
+                                  </span>
+                                  <span className="text-[11px] text-zinc-500">
+                                    {timeAgo(selectedTextVersion.createdAt)}
+                                  </span>
+                                </div>
+                                <div className="truncate text-sm text-zinc-200">
+                                  {selectedTextVersion.name}
+                                </div>
+                                <div className="mt-0.5 text-[11px] text-zinc-500">
+                                  {formatVersionTimestamp(
+                                    selectedTextVersion.createdAt,
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {selectedTextVersion.previewText && (
+                              <div className="mt-1.5 max-h-20 overflow-hidden rounded-md border border-zinc-800/60 bg-zinc-900 px-2 py-1.5 text-[11px] text-zinc-500">
+                                {selectedTextVersion.previewText}
+                              </div>
+                            )}
+                            <div className="mt-2 flex justify-end gap-2">
+                              {confirmRestoreVersionId === selectedTextVersion._id ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="cursor-pointer rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                                    onClick={() => setConfirmRestoreVersionId(null)}
+                                    disabled={Boolean(restoringTextVersionId)}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex cursor-pointer items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs font-medium text-zinc-900 transition-opacity hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40"
+                                    onClick={handleRestoreSelectedTextVersion}
+                                    disabled={Boolean(restoringTextVersionId)}
+                                  >
+                                    {restoringTextVersionId ===
+                                    selectedTextVersion._id ? (
+                                      <Loader2 size={12} className="animate-spin" />
+                                    ) : (
+                                      <RotateCcw size={12} strokeWidth={1.8} />
+                                    )}
+                                    <span>
+                                      {restoringTextVersionId ===
+                                      selectedTextVersion._id
+                                        ? 'Restoring'
+                                        : 'Confirm restore'}
+                                    </span>
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                  onClick={() =>
+                                    setConfirmRestoreVersionId(
+                                      selectedTextVersion._id,
+                                    )
+                                  }
+                                  disabled={Boolean(restoringTextVersionId)}
+                                  title="Restore selected version"
+                                >
+                                  <RotateCcw size={12} strokeWidth={1.8} />
+                                  <span>Restore selected</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="max-h-40 space-y-1 overflow-auto rounded-lg border border-zinc-800/60 bg-zinc-950 p-1.5">
+                            {orderedTextVersions.map((version, index) => (
+                              <button
+                                key={version._id}
+                                type="button"
+                                className={`block w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+                                  index === selectedTextVersionIndex
+                                    ? 'bg-zinc-800 text-zinc-100'
+                                    : 'text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200'
+                                }`}
+                                onClick={() => setSelectedTextVersionIndex(index)}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="block truncate">{version.name}</span>
+                                  <span
+                                    className={`rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-[0.14em] ${
+                                      getVersionSource(version.name) === 'auto'
+                                        ? 'border border-sky-700/50 bg-sky-500/15 text-sky-300'
+                                        : 'border border-zinc-700 bg-zinc-800 text-zinc-300'
+                                    }`}
+                                  >
+                                    {getVersionSource(version.name)}
+                                  </span>
+                                </div>
+                                <span className="mt-0.5 block text-[10px] text-zinc-500">
+                                  {formatVersionTimestamp(version.createdAt)}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border border-zinc-700 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
@@ -1588,7 +2333,7 @@ export default function TextEditorWorkspace({
               label="Generate Image"
               active={showMediaComposer}
               disabled={!editor || !selectedImageModelId || isGeneratingImage}
-              onClick={() => {
+              onClick={(event) => {
                 const selectedText = editor
                   ?.state.doc.textBetween(
                     editor.state.selection.from,
@@ -1596,7 +2341,16 @@ export default function TextEditorWorkspace({
                     '\n\n',
                   )
                   .trim()
-                openMediaComposer(selectedText || mediaPrompt)
+                const triggerBounds = event.currentTarget.getBoundingClientRect()
+                openMediaComposer({
+                  prompt: selectedText || mediaPrompt,
+                  anchor: {
+                    source: 'toolbar',
+                    x: triggerBounds.right,
+                    y: triggerBounds.bottom,
+                    align: 'end',
+                  },
+                })
               }}
             />
             <ToolbarButton
@@ -1627,13 +2381,17 @@ export default function TextEditorWorkspace({
             ref={editorScrollRef}
             className="relative min-h-0 flex-1 overflow-auto bg-zinc-900 px-5 py-6 sm:px-7 sm:py-8"
           >
-            {(mediaError || helperError || exportError) && (
+            {(mediaError || helperError || exportError || textVersionError) && (
               <div className="sticky top-0 z-20 mb-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-6 py-3 text-sm text-red-200 backdrop-blur">
-                {exportError || helperError || mediaError}
+                {exportError || textVersionError || helperError || mediaError}
               </div>
             )}
             {showMediaComposer && (
-              <div className="absolute top-5 right-5 z-[10001] w-full max-w-md rounded-xl border border-zinc-800/60 bg-zinc-900 p-4 shadow-[0_2px_10px_rgba(0,0,0,0.45)] backdrop-blur">
+              <div
+                ref={mediaComposerRef}
+                className="fixed z-[10001] w-[min(28rem,calc(100vw-1.5rem))] rounded-xl border border-zinc-800/60 bg-zinc-900 p-4 shadow-[0_2px_10px_rgba(0,0,0,0.45)] backdrop-blur"
+                style={{ left: mediaComposerLeft, top: mediaComposerTop }}
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="text-sm font-semibold text-zinc-100">
@@ -1647,7 +2405,7 @@ export default function TextEditorWorkspace({
                   <button
                     type="button"
                     className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
-                    onClick={() => setShowMediaComposer(false)}
+                    onClick={closeMediaComposer}
                     disabled={isGeneratingImage}
                     title="Close image generator"
                   >
@@ -1729,6 +2487,15 @@ export default function TextEditorWorkspace({
                 className="h-full min-h-[calc(100vh-15rem)] w-full [&_.tiptap]:h-full [&_.tiptap]:w-full"
               />
             </div>
+            {isRunningTextHelper && pendingTextHelper && (
+              <div
+                className="pointer-events-none fixed z-[10003] inline-flex h-11 w-[248px] items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-900 px-3 text-sm text-zinc-200 shadow-[0_2px_10px_rgba(0,0,0,0.45)] backdrop-blur animate-[fadeSlideIn_180ms_ease-out]"
+                style={{ left: helperStatusLeft, top: helperStatusTop }}
+              >
+                <Loader2 size={14} className="animate-spin text-zinc-400" />
+                <span>{pendingTextHelper.actionLabel} in progress...</span>
+              </div>
+            )}
             {selectionMenu &&
               !showMediaComposer &&
               !slashMenu &&
@@ -1756,7 +2523,15 @@ export default function TextEditorWorkspace({
                   className="inline-flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
                   onMouseDown={(event) => {
                     event.preventDefault()
-                    openMediaComposer(selectionMenu.text)
+                    openMediaComposer({
+                      prompt: selectionMenu.text,
+                      anchor: {
+                        source: 'selection-menu',
+                        x: selectionMenu.x,
+                        y: selectionMenu.selectionBottom,
+                        align: 'center',
+                      },
+                    })
                   }}
                 >
                   <Sparkles size={14} strokeWidth={1.8} />

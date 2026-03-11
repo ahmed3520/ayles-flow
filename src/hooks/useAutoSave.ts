@@ -25,6 +25,7 @@ export function useAutoSave({
 }: UseAutoSaveOptions) {
   const updateProject = useMutation(api.projects.update)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const savePromiseRef = useRef<Promise<void> | null>(null)
   const changeVersionRef = useRef(0)
   const savedVersionRef = useRef(0)
   const isSavingRef = useRef(false)
@@ -36,8 +37,11 @@ export function useAutoSave({
   nodesRef.current = nodes
   edgesRef.current = edges
 
-  const save = useCallback(() => {
-    if (isSavingRef.current) return
+  const save = useCallback(async () => {
+    if (isSavingRef.current) {
+      await savePromiseRef.current
+      return
+    }
 
     if (changeVersionRef.current === savedVersionRef.current) {
       setSaveStatus('saved')
@@ -48,7 +52,7 @@ export function useAutoSave({
     setSaveStatus('saving')
     const versionAtSave = changeVersionRef.current
 
-    updateProject({
+    const savePromise = updateProject({
       id: projectId,
       nodes: nodesRef.current as Array<any>,
       edges: edgesRef.current as Array<any>,
@@ -64,11 +68,16 @@ export function useAutoSave({
       })
       .finally(() => {
         isSavingRef.current = false
+        savePromiseRef.current = null
         // If more changes happened while saving, schedule another save
         if (changeVersionRef.current !== savedVersionRef.current) {
-          timerRef.current = setTimeout(save, debounceMs)
+          timerRef.current = setTimeout(() => {
+            void save()
+          }, debounceMs)
         }
       })
+    savePromiseRef.current = savePromise
+    await savePromise
   }, [projectId, updateProject, debounceMs])
 
   useEffect(() => {
@@ -78,7 +87,9 @@ export function useAutoSave({
     setSaveStatus('unsaved')
 
     if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(save, debounceMs)
+    timerRef.current = setTimeout(() => {
+      void save()
+    }, debounceMs)
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
@@ -91,15 +102,27 @@ export function useAutoSave({
       if (timerRef.current) {
         clearTimeout(timerRef.current)
         timerRef.current = null
-        save()
+        void save()
       }
     }
   }, [save])
+
+  const flushSave = useCallback(async () => {
+    if (!enabled) return
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+
+    while (changeVersionRef.current !== savedVersionRef.current) {
+      await save()
+    }
+  }, [enabled, save])
 
   const initializeBaseline = useCallback(() => {
     changeVersionRef.current = 0
     savedVersionRef.current = 0
   }, [])
 
-  return { saveStatus, initializeBaseline }
+  return { saveStatus, initializeBaseline, flushSave }
 }

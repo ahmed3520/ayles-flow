@@ -214,6 +214,56 @@ function renderListMarkdown(
     .join('\n')}\n`
 }
 
+function normalizeMarkdownTableCell(value: string): string {
+  return value
+    .replace(/\n+/g, ' ')
+    .replace(/\|/g, '\\|')
+    .trim()
+}
+
+function renderMarkdownTableRow(cells: Array<string>): string {
+  return `| ${cells.map(normalizeMarkdownTableCell).join(' | ')} |`
+}
+
+function extractTableRowCells(row: HTMLTableRowElement): Array<string> {
+  return Array.from(row.cells).map((cell) =>
+    renderInlineMarkdownNodes(Array.from(cell.childNodes)).trim(),
+  )
+}
+
+function renderTableMarkdown(element: HTMLElement): string {
+  const headRows = Array.from(element.querySelectorAll('thead tr')).map(
+    (row) => extractTableRowCells(row),
+  )
+  const bodyRows = Array.from(element.querySelectorAll('tbody tr')).map(
+    (row) => extractTableRowCells(row),
+  )
+
+  const fallbackRows =
+    headRows.length === 0 && bodyRows.length === 0
+      ? Array.from(element.querySelectorAll('tr')).map((row) =>
+          extractTableRowCells(row),
+        )
+      : []
+
+  const rows = [...headRows, ...bodyRows, ...fallbackRows].filter(
+    (row) => row.length > 0,
+  )
+  if (rows.length === 0) return ''
+
+  const header = rows[0]
+  const body = rows.slice(1)
+  const separator = header.map(() => '---')
+
+  const lines = [
+    renderMarkdownTableRow(header),
+    renderMarkdownTableRow(separator),
+    ...body.map((row) => renderMarkdownTableRow(row)),
+  ]
+
+  return `${lines.join('\n')}\n\n`
+}
+
 function renderBlockMarkdown(node: ChildNode): string {
   if (node.nodeType === 3) {
     const text = escapeMarkdownText(node.textContent?.trim() ?? '')
@@ -255,6 +305,8 @@ function renderBlockMarkdown(node: ChildNode): string {
       return `${renderListMarkdown(element, false)}\n`
     case 'ol':
       return `${renderListMarkdown(element, true)}\n`
+    case 'table':
+      return renderTableMarkdown(element)
     case 'pre': {
       const codeElement = element.querySelector('code')
       const language =
@@ -311,6 +363,25 @@ export function markdownToRichTextHtml(value: string): string {
   let codeLines: Array<string> = []
   let inCodeBlock = false
 
+  const parseMarkdownTableCells = (rawLine: string): Array<string> => {
+    let line = rawLine.trim()
+    if (!line.includes('|')) return []
+    if (line.startsWith('|')) line = line.slice(1)
+    if (line.endsWith('|')) line = line.slice(0, -1)
+    return line.split('|').map((cell) => applyInlineMarkdown(cell.trim()))
+  }
+
+  const isMarkdownTableSeparator = (rawLine: string): boolean => {
+    let line = rawLine.trim()
+    if (!line.includes('|')) return false
+    if (line.startsWith('|')) line = line.slice(1)
+    if (line.endsWith('|')) line = line.slice(0, -1)
+
+    const parts = line.split('|').map((part) => part.trim())
+    if (parts.length === 0) return false
+    return parts.every((part) => /^:?-{3,}:?$/.test(part))
+  }
+
   const flushParagraph = () => {
     if (paragraph.length === 0) return
     html.push(wrapParagraph(paragraph))
@@ -354,7 +425,8 @@ export function markdownToRichTextHtml(value: string): string {
     flushQuote()
   }
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]
     const trimmed = line.trim()
 
     if (trimmed.startsWith('```')) {
@@ -416,6 +488,68 @@ export function markdownToRichTextHtml(value: string): string {
       flushBulletList()
       flushOrderedList()
       quoteLines.push(quote[1])
+      continue
+    }
+
+    const nextLine = lines[index + 1]?.trim() ?? ''
+    if (trimmed.includes('|') && isMarkdownTableSeparator(nextLine)) {
+      flushAll()
+
+      const headerCells = parseMarkdownTableCells(line)
+      if (headerCells.length === 0) {
+        paragraph.push(trimmed)
+        continue
+      }
+
+      const rowCells: Array<Array<string>> = []
+      index += 2
+
+      while (index < lines.length) {
+        const rowLine = lines[index]
+        const rowTrimmed = rowLine.trim()
+        if (
+          !rowTrimmed ||
+          !rowTrimmed.includes('|') ||
+          isMarkdownTableSeparator(rowTrimmed)
+        ) {
+          break
+        }
+
+        const cells = parseMarkdownTableCells(rowLine)
+        if (cells.length === 0) break
+        rowCells.push(cells)
+        index += 1
+      }
+
+      index -= 1
+
+      const columnCount = headerCells.length
+      const normalizeRow = (cells: Array<string>): Array<string> => {
+        if (cells.length === columnCount) return cells
+        if (cells.length > columnCount) return cells.slice(0, columnCount)
+        return [
+          ...cells,
+          ...Array.from({ length: columnCount - cells.length }, () => ''),
+        ]
+      }
+
+      const headerHtml = normalizeRow(headerCells)
+        .map((cell) => `<th>${cell || '&nbsp;'}</th>`)
+        .join('')
+      const bodyHtml = rowCells
+        .map(
+          (cells) =>
+            `<tr>${normalizeRow(cells)
+              .map((cell) => `<td>${cell || '&nbsp;'}</td>`)
+              .join('')}</tr>`,
+        )
+        .join('')
+
+      html.push(
+        `<table><thead><tr>${headerHtml}</tr></thead>${
+          bodyHtml ? `<tbody>${bodyHtml}</tbody>` : ''
+        }</table>`,
+      )
       continue
     }
 

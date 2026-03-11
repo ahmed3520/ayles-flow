@@ -155,7 +155,7 @@ function Docs() {
         <p>
           Ayles Flow uses a credit-based system. Each AI generation costs a
           set number of credits depending on the model. The Free plan includes
-          1 credit per month. The Pro plan ($20/mo) includes 50 credits per
+          10 credits per month. The Pro plan ($17/mo) includes 500 credits per
           month. Credits reset each billing cycle.
         </p>
       </section>

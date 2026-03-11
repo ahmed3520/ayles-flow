@@ -1,4 +1,4 @@
-import type { NodeContentType, PortType } from './nodes'
+import type { GenerationStatus, NodeContentType, PortType } from './nodes'
 
 // --- Agent Actions (canvas modifications) ---
 
@@ -7,6 +7,8 @@ export type AddNodeAction = {
   nodeId: string
   contentType: NodeContentType
   prompt?: string
+  resultText?: string
+  generationStatus?: GenerationStatus
   model?: string
   label?: string
   x: number

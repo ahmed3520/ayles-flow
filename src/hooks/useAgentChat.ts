@@ -262,6 +262,7 @@ export function useAgentChat({
           }
 
           const defaults = NODE_DEFAULTS[action.contentType]
+          const generationStatus = action.generationStatus ?? 'idle'
           const newNode: Node<BlockNodeData> = {
             id: nodeId,
             type: 'blockNode',
@@ -272,7 +273,10 @@ export function useAgentChat({
               label: action.label || `New ${action.contentType} block`,
               prompt: action.prompt || '',
               model: action.model || '',
-              generationStatus: 'idle',
+              generationStatus,
+              ...(action.resultText !== undefined && {
+                resultText: action.resultText,
+              }),
               ...(action.previewUrl && { previewUrl: action.previewUrl }),
               ...(action.sandboxId && { sandboxId: action.sandboxId }),
             },

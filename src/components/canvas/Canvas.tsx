@@ -222,7 +222,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
     textEditorBridgeRef,
   })
 
-  const { saveStatus, initializeBaseline } = useAutoSave({
+  const { saveStatus, initializeBaseline, flushSave } = useAutoSave({
     projectId,
     nodes,
     edges,
@@ -786,6 +786,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
           projectId={projectId}
           onClose={() => setShowVersions(false)}
           onRestore={onVersionRestore}
+          onBeforeSaveVersion={flushSave}
         />
       )}
 
@@ -809,6 +810,7 @@ function CanvasFlow({ projectId, onVersionRestore }: CanvasFlowProps) {
       )}
 
       <TextEditorWorkspace
+        projectId={projectId}
         agentPanelProps={{
           messages: agent.messages,
           isStreaming: agent.isStreaming,

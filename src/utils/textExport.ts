@@ -273,14 +273,13 @@ function writePdfTextBlock(
   doc: jsPDF,
   text: string,
   options: {
-    checkPage: (needed: number) => void
+    checkPage: (needed: number) => number
     contentWidth: number
     fontSize: number
     indent?: number
     margin: number
     spacingAfter: number
     style?: 'bold' | 'normal' | 'italic'
-    y: number
   },
 ) {
   const {
@@ -291,16 +290,15 @@ function writePdfTextBlock(
     margin,
     spacingAfter,
     style = 'normal',
-    y,
   } = options
 
   doc.setFontSize(fontSize)
   doc.setFont('helvetica', style)
   const wrapped = doc.splitTextToSize(text, contentWidth - indent)
   const lineHeight = fontSize * 0.45 + 1
-  checkPage(wrapped.length * lineHeight + spacingAfter)
-  doc.text(wrapped, margin + indent, y)
-  return y + wrapped.length * lineHeight + spacingAfter
+  const startY = checkPage(wrapped.length * lineHeight + spacingAfter)
+  doc.text(wrapped, margin + indent, startY)
+  return startY + wrapped.length * lineHeight + spacingAfter
 }
 
 async function generateTextDocumentPdf(
@@ -330,6 +328,7 @@ async function generateTextDocumentPdf(
     if (y + needed > pageHeight - margin) {
       addPage()
     }
+    return y
   }
 
   doc.setFontSize(22)
@@ -364,7 +363,6 @@ async function generateTextDocumentPdf(
           margin,
           spacingAfter: 4,
           style: 'bold',
-          y,
         })
         continue
       }
@@ -375,7 +373,6 @@ async function generateTextDocumentPdf(
           fontSize: 10,
           margin,
           spacingAfter: 3,
-          y,
         })
         continue
       }
@@ -388,7 +385,6 @@ async function generateTextDocumentPdf(
           margin,
           spacingAfter: 4,
           style: 'italic',
-          y,
         })
         continue
       }
@@ -404,7 +400,6 @@ async function generateTextDocumentPdf(
           indent: 4,
           margin,
           spacingAfter: 4,
-          y,
         })
         continue
       }
@@ -444,7 +439,6 @@ async function generateTextDocumentPdf(
             margin,
             spacingAfter: 3,
             style: 'italic',
-            y,
           })
           continue
         }

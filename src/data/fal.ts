@@ -22,6 +22,11 @@ type SubmitImageToolInput = {
   upscaleFactor?: number
 }
 
+const IMAGE_TOOL_MODEL_ALIASES: Record<string, string> = {
+  'fal-ai/bria/background/remove': 'pixelcut/background-removal',
+  'fal-ai/pixelcut/background-removal': 'pixelcut/background-removal',
+}
+
 // Model-specific overrides for audio param name
 const AUDIO_PARAM_OVERRIDES: Partial<Record<string, string>> = {
   'fal-ai/minimax-music': 'reference_audio_url',
@@ -35,19 +40,33 @@ const IMAGE_ARRAY_MODELS = new Set([
 
 // Models that switch to a different endpoint when an image is provided
 const IMAGE_EDIT_ROUTES: Record<string, string> = {
+  'fal-ai/bytedance/seedream/v5/lite/text-to-image':
+    'fal-ai/bytedance/seedream/v5/lite/edit',
   'fal-ai/nano-banana-2': 'fal-ai/nano-banana-2/edit',
 }
+
+// Backward-compatible model aliases (old IDs -> current IDs)
+const MODEL_ALIASES: Record<string, string> = {
+  'fal-ai/bytedance/seedream/v5/lite':
+    'fal-ai/bytedance/seedream/v5/lite/text-to-image',
+}
+
+// Legacy/edit IDs that should fall back to base endpoints when no image is provided
+const IMAGE_BASE_ROUTES: Record<string, string> = Object.fromEntries(
+  Object.entries(IMAGE_EDIT_ROUTES).map(([base, edit]) => [edit, base]),
+)
 
 export function buildFalInput(data: SubmitInput): {
   input: Record<string, unknown>
   model: string
 } {
   const { contentType, prompt, imageUrl, audioUrl, videoUrl } = data
-  // Route to edit endpoint when an image is provided
-  const model =
-    imageUrl && IMAGE_EDIT_ROUTES[data.model]
-      ? IMAGE_EDIT_ROUTES[data.model]
-      : data.model
+  const normalizedModel = MODEL_ALIASES[data.model] ?? data.model
+  // Route to edit endpoint when an image is provided. If an edit endpoint is
+  // selected without image input, fall back to its base text-to-image endpoint.
+  const model = imageUrl
+    ? (IMAGE_EDIT_ROUTES[normalizedModel] ?? normalizedModel)
+    : (IMAGE_BASE_ROUTES[normalizedModel] ?? normalizedModel)
   const input: Record<string, unknown> = {}
 
   // Content-type defaults
@@ -162,7 +181,7 @@ export const submitImageTool = createServerFn({
       throw new Error('Image URL is required')
     }
 
-    const model = data.modelId
+    const model = IMAGE_TOOL_MODEL_ALIASES[data.modelId] ?? data.modelId
     const input: Record<string, unknown> = { image_url: imageUrl }
 
     if (data.action === 'upscale' && model === 'fal-ai/topaz/upscale/image') {
