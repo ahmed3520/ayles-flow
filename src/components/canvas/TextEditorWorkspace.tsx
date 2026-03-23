@@ -1838,13 +1838,13 @@ export default function TextEditorWorkspace({
     <div className="fixed inset-0 z-[9999] bg-zinc-900">
       <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_25rem]">
         <div className="flex min-h-0 flex-col border-r border-zinc-800/60 bg-zinc-900">
-          <div className="flex items-center justify-between gap-4 border-b border-zinc-800/60 bg-zinc-900 px-7 py-4">
-            <div className="min-w-0">
-              <div className="flex items-center gap-3 text-zinc-50">
+          <div className="flex items-center gap-4 border-b border-zinc-800/60 bg-zinc-900 px-7 py-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-3 text-zinc-50">
                 <span className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-700/70 bg-zinc-800/40 text-zinc-300">
                   <SquarePen size={17} strokeWidth={1.8} />
                 </span>
-                <span className="truncate text-base font-semibold tracking-[-0.02em]">
+                <span className="min-w-0 flex-1 truncate text-base font-semibold tracking-[-0.02em]">
                   {label}
                 </span>
               </div>
@@ -1852,7 +1852,7 @@ export default function TextEditorWorkspace({
                 Text editor workspace
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               {isRunningTextHelper && pendingTextHelper && (
                 <div className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-[11px] text-zinc-300">
                   {pendingTextHelper.actionLabel}...

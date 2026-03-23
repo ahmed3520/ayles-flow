@@ -20,7 +20,10 @@ function applyInlineMarkdown(value: string): string {
   })
 
   html = html
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(
+      /\[([^\]]+)\]\(((?:https?:\/\/|\/|mailto:)[^\s)]+)\)/g,
+      '<a href="$2">$1</a>',
+    )
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/__([^_]+)__/g, '<strong>$1</strong>')
     .replace(/(^|[^\w])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')

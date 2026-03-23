@@ -18,13 +18,18 @@ import { Route as DemoRouteImport } from './routes/demo'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as ChangelogRouteImport } from './routes/changelog'
 import { Route as CanvasRouteImport } from './routes/canvas'
+import { Route as BlogRouteImport } from './routes/blog'
 import { Route as BillingRouteImport } from './routes/billing'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as LandingSlugRouteImport } from './routes/$landingSlug'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FeaturesIndexRouteImport } from './routes/features.index'
+import { Route as BlogIndexRouteImport } from './routes/blog.index'
 import { Route as FeaturesSlugRouteImport } from './routes/features.$slug'
 import { Route as DemoConvexRouteImport } from './routes/demo/convex'
 import { Route as CanvasProjectIdRouteImport } from './routes/canvas.$projectId'
+import { Route as BlogSlugRouteImport } from './routes/blog.$slug'
+import { Route as ApiSitemapRouteImport } from './routes/api/sitemap'
 import { Route as DemoStartServerFuncsRouteImport } from './routes/demo/start.server-funcs'
 import { Route as DemoStartApiRequestRouteImport } from './routes/demo/start.api-request'
 import { Route as DemoApiNamesRouteImport } from './routes/demo/api.names'
@@ -78,6 +83,11 @@ const CanvasRoute = CanvasRouteImport.update({
   path: '/canvas',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BlogRoute = BlogRouteImport.update({
+  id: '/blog',
+  path: '/blog',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BillingRoute = BillingRouteImport.update({
   id: '/billing',
   path: '/billing',
@@ -86,6 +96,11 @@ const BillingRoute = BillingRouteImport.update({
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LandingSlugRoute = LandingSlugRouteImport.update({
+  id: '/$landingSlug',
+  path: '/$landingSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -97,6 +112,11 @@ const FeaturesIndexRoute = FeaturesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => FeaturesRoute,
+} as any)
+const BlogIndexRoute = BlogIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => BlogRoute,
 } as any)
 const FeaturesSlugRoute = FeaturesSlugRouteImport.update({
   id: '/$slug',
@@ -112,6 +132,16 @@ const CanvasProjectIdRoute = CanvasProjectIdRouteImport.update({
   id: '/$projectId',
   path: '/$projectId',
   getParentRoute: () => CanvasRoute,
+} as any)
+const BlogSlugRoute = BlogSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => BlogRoute,
+} as any)
+const ApiSitemapRoute = ApiSitemapRouteImport.update({
+  id: '/api/sitemap',
+  path: '/api/sitemap',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const DemoStartServerFuncsRoute = DemoStartServerFuncsRouteImport.update({
   id: '/start/server-funcs',
@@ -151,8 +181,10 @@ const DemoStartSsrDataOnlyRoute = DemoStartSsrDataOnlyRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/$landingSlug': typeof LandingSlugRoute
   '/about': typeof AboutRoute
   '/billing': typeof BillingRoute
+  '/blog': typeof BlogRouteWithChildren
   '/canvas': typeof CanvasRouteWithChildren
   '/changelog': typeof ChangelogRoute
   '/contact': typeof ContactRoute
@@ -162,9 +194,12 @@ export interface FileRoutesByFullPath {
   '/privacy': typeof PrivacyRoute
   '/quasar': typeof QuasarRoute
   '/terms': typeof TermsRoute
+  '/api/sitemap': typeof ApiSitemapRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
   '/features/$slug': typeof FeaturesSlugRoute
+  '/blog/': typeof BlogIndexRoute
   '/features/': typeof FeaturesIndexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
@@ -176,6 +211,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/$landingSlug': typeof LandingSlugRoute
   '/about': typeof AboutRoute
   '/billing': typeof BillingRoute
   '/canvas': typeof CanvasRouteWithChildren
@@ -186,9 +222,12 @@ export interface FileRoutesByTo {
   '/privacy': typeof PrivacyRoute
   '/quasar': typeof QuasarRoute
   '/terms': typeof TermsRoute
+  '/api/sitemap': typeof ApiSitemapRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
   '/features/$slug': typeof FeaturesSlugRoute
+  '/blog': typeof BlogIndexRoute
   '/features': typeof FeaturesIndexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
@@ -201,8 +240,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/$landingSlug': typeof LandingSlugRoute
   '/about': typeof AboutRoute
   '/billing': typeof BillingRoute
+  '/blog': typeof BlogRouteWithChildren
   '/canvas': typeof CanvasRouteWithChildren
   '/changelog': typeof ChangelogRoute
   '/contact': typeof ContactRoute
@@ -212,9 +253,12 @@ export interface FileRoutesById {
   '/privacy': typeof PrivacyRoute
   '/quasar': typeof QuasarRoute
   '/terms': typeof TermsRoute
+  '/api/sitemap': typeof ApiSitemapRoute
+  '/blog/$slug': typeof BlogSlugRoute
   '/canvas/$projectId': typeof CanvasProjectIdRoute
   '/demo/convex': typeof DemoConvexRoute
   '/features/$slug': typeof FeaturesSlugRoute
+  '/blog/': typeof BlogIndexRoute
   '/features/': typeof FeaturesIndexRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
@@ -228,8 +272,10 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/$landingSlug'
     | '/about'
     | '/billing'
+    | '/blog'
     | '/canvas'
     | '/changelog'
     | '/contact'
@@ -239,9 +285,12 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/quasar'
     | '/terms'
+    | '/api/sitemap'
+    | '/blog/$slug'
     | '/canvas/$projectId'
     | '/demo/convex'
     | '/features/$slug'
+    | '/blog/'
     | '/features/'
     | '/demo/api/names'
     | '/demo/start/api-request'
@@ -253,6 +302,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/$landingSlug'
     | '/about'
     | '/billing'
     | '/canvas'
@@ -263,9 +313,12 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/quasar'
     | '/terms'
+    | '/api/sitemap'
+    | '/blog/$slug'
     | '/canvas/$projectId'
     | '/demo/convex'
     | '/features/$slug'
+    | '/blog'
     | '/features'
     | '/demo/api/names'
     | '/demo/start/api-request'
@@ -277,8 +330,10 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/$landingSlug'
     | '/about'
     | '/billing'
+    | '/blog'
     | '/canvas'
     | '/changelog'
     | '/contact'
@@ -288,9 +343,12 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/quasar'
     | '/terms'
+    | '/api/sitemap'
+    | '/blog/$slug'
     | '/canvas/$projectId'
     | '/demo/convex'
     | '/features/$slug'
+    | '/blog/'
     | '/features/'
     | '/demo/api/names'
     | '/demo/start/api-request'
@@ -303,8 +361,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LandingSlugRoute: typeof LandingSlugRoute
   AboutRoute: typeof AboutRoute
   BillingRoute: typeof BillingRoute
+  BlogRoute: typeof BlogRouteWithChildren
   CanvasRoute: typeof CanvasRouteWithChildren
   ChangelogRoute: typeof ChangelogRoute
   ContactRoute: typeof ContactRoute
@@ -314,6 +374,7 @@ export interface RootRouteChildren {
   PrivacyRoute: typeof PrivacyRoute
   QuasarRoute: typeof QuasarRoute
   TermsRoute: typeof TermsRoute
+  ApiSitemapRoute: typeof ApiSitemapRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -381,6 +442,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CanvasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/blog': {
+      id: '/blog'
+      path: '/blog'
+      fullPath: '/blog'
+      preLoaderRoute: typeof BlogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/billing': {
       id: '/billing'
       path: '/billing'
@@ -393,6 +461,13 @@ declare module '@tanstack/react-router' {
       path: '/about'
       fullPath: '/about'
       preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$landingSlug': {
+      id: '/$landingSlug'
+      path: '/$landingSlug'
+      fullPath: '/$landingSlug'
+      preLoaderRoute: typeof LandingSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -408,6 +483,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/features/'
       preLoaderRoute: typeof FeaturesIndexRouteImport
       parentRoute: typeof FeaturesRoute
+    }
+    '/blog/': {
+      id: '/blog/'
+      path: '/'
+      fullPath: '/blog/'
+      preLoaderRoute: typeof BlogIndexRouteImport
+      parentRoute: typeof BlogRoute
     }
     '/features/$slug': {
       id: '/features/$slug'
@@ -429,6 +511,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/canvas/$projectId'
       preLoaderRoute: typeof CanvasProjectIdRouteImport
       parentRoute: typeof CanvasRoute
+    }
+    '/blog/$slug': {
+      id: '/blog/$slug'
+      path: '/$slug'
+      fullPath: '/blog/$slug'
+      preLoaderRoute: typeof BlogSlugRouteImport
+      parentRoute: typeof BlogRoute
+    }
+    '/api/sitemap': {
+      id: '/api/sitemap'
+      path: '/api/sitemap'
+      fullPath: '/api/sitemap'
+      preLoaderRoute: typeof ApiSitemapRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/demo/start/server-funcs': {
       id: '/demo/start/server-funcs'
@@ -482,6 +578,18 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface BlogRouteChildren {
+  BlogSlugRoute: typeof BlogSlugRoute
+  BlogIndexRoute: typeof BlogIndexRoute
+}
+
+const BlogRouteChildren: BlogRouteChildren = {
+  BlogSlugRoute: BlogSlugRoute,
+  BlogIndexRoute: BlogIndexRoute,
+}
+
+const BlogRouteWithChildren = BlogRoute._addFileChildren(BlogRouteChildren)
+
 interface CanvasRouteChildren {
   CanvasProjectIdRoute: typeof CanvasProjectIdRoute
 }
@@ -533,8 +641,10 @@ const FeaturesRouteWithChildren = FeaturesRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LandingSlugRoute: LandingSlugRoute,
   AboutRoute: AboutRoute,
   BillingRoute: BillingRoute,
+  BlogRoute: BlogRouteWithChildren,
   CanvasRoute: CanvasRouteWithChildren,
   ChangelogRoute: ChangelogRoute,
   ContactRoute: ContactRoute,
@@ -544,6 +654,7 @@ const rootRouteChildren: RootRouteChildren = {
   PrivacyRoute: PrivacyRoute,
   QuasarRoute: QuasarRoute,
   TermsRoute: TermsRoute,
+  ApiSitemapRoute: ApiSitemapRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

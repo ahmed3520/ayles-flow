@@ -29,6 +29,7 @@ import type { BlockNodeData } from '@/types/nodes'
 import BlockNodeComponent from '@/components/canvas/nodes/BlockNode'
 import Footer from '@/components/Footer'
 import { FEATURE_PAGES, getFeaturePagePath } from '@/data/featurePages'
+import { SEO_PAGES, getSeoPagePath } from '@/data/seoPages'
 import { NODE_DEFAULTS } from '@/types/nodes'
 
 /* ------------------------------------------------------------------ */
@@ -1459,6 +1460,69 @@ function FeatureRoutes() {
   )
 }
 
+function WorkflowPages() {
+  const f = useFadeIn<HTMLElement>()
+  const pages = SEO_PAGES.filter((page) =>
+    [
+      'ai-workflow-builder',
+      'image-to-video-workflow',
+      'ai-content-workflow',
+    ].includes(page.slug),
+  )
+
+  return (
+    <section ref={f.ref} className={`px-6 py-28 ${f.className}`}>
+      <div className="mx-auto max-w-[1040px]">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="mb-3 text-[13px] font-medium text-zinc-600">
+              Search-ready pages
+            </p>
+            <h2 className="max-w-xl text-[clamp(1.75rem,3.5vw,2.5rem)] font-bold tracking-[-0.025em] text-white">
+              Strong landing pages built around
+              <br />
+              real workflow intent.
+            </h2>
+          </div>
+          <a
+            href={getSeoPagePath('ai-workflow-builder')}
+            className="inline-flex rounded-full border border-zinc-800 px-5 py-2.5 text-[14px] text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
+          >
+            Explore workflow pages
+          </a>
+        </div>
+
+        <div className="mt-12 grid gap-4 lg:grid-cols-3">
+          {pages.map((page) => (
+            <a
+              key={page.slug}
+              href={getSeoPagePath(page.slug)}
+              className="group rounded-2xl border border-zinc-800/60 bg-zinc-900/20 p-6 transition-colors hover:border-zinc-700/60 hover:bg-zinc-900/40"
+            >
+              <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-zinc-600">
+                {page.heroEyebrow}
+              </p>
+              <h3 className="mt-4 text-[20px] font-semibold tracking-[-0.02em] text-zinc-100 transition-colors group-hover:text-white">
+                {page.title}
+              </h3>
+              <p className="mt-3 text-[14px] leading-relaxed text-zinc-500">
+                {page.description}
+              </p>
+              <div className="mt-5 flex items-center gap-1.5 text-[13px] font-medium text-zinc-500 transition-colors group-hover:text-zinc-300">
+                Read the page
+                <ArrowRight
+                  size={13}
+                  className="transition-transform group-hover:translate-x-0.5"
+                />
+              </div>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /* ------------------------------------------------------------------ */
 /*  Final CTA                                                          */
 /* ------------------------------------------------------------------ */
@@ -1507,6 +1571,7 @@ export default function LandingPage() {
       <Steps />
       <Capabilities />
       <FeatureRoutes />
+      <WorkflowPages />
       <Pricing onSignIn={handleSignIn} />
       <Cta onSignIn={handleSignIn} />
       <Footer onSignIn={handleSignIn} />

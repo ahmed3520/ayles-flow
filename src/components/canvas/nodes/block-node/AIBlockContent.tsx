@@ -1,16 +1,14 @@
 import { AlertCircle, Download, Loader2 } from 'lucide-react'
 import { code } from '@streamdown/code'
 import { Streamdown } from 'streamdown'
+import { memo } from 'react'
+import PdfViewer from '../../PdfViewer'
 
-import { Suspense, lazy, memo } from 'react'
 import type { CSSProperties, SyntheticEvent } from 'react'
-
 import type { BlockNodeData } from '@/types/nodes'
 import type { ContentTypeConfigEntry } from './constants'
-import { downloadNodeResult } from '@/utils/downloadUtils'
 import { isHtmlDocument } from '@/utils/nodeTextUtils'
-
-const PdfViewer = lazy(() => import('../../PdfViewer'))
+import { downloadNodeResult } from '@/utils/downloadUtils'
 
 const streamdownPlugins = { code }
 
@@ -103,15 +101,7 @@ function AIBlockContent({
           )}
           {data.contentType === 'pdf' && data.resultUrl && (
             <div className="h-full px-2 pb-2">
-              <Suspense
-                fallback={
-                  <div className="flex items-center justify-center p-4 text-zinc-400 text-xs">
-                    Loading PDF viewer...
-                  </div>
-                }
-              >
-                <PdfViewer url={data.resultUrl} />
-              </Suspense>
+              <PdfViewer url={data.resultUrl} />
             </div>
           )}
           {data.resultUrl && (

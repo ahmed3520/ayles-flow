@@ -200,3 +200,60 @@ export function buildBreadcrumbSchema(
     })),
   }
 }
+
+export function buildFaqSchema(
+  items: Array<{ question: string; answer: string }>,
+) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: items.map((item) => ({
+      '@type': 'Question',
+      name: item.question,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: item.answer,
+      },
+    })),
+  }
+}
+
+export function buildArticleSchema({
+  title,
+  description,
+  path,
+  publishedAt,
+  author,
+  imagePath,
+}: {
+  title: string
+  description: string
+  path: string
+  publishedAt: string
+  author: string
+  imagePath?: string
+}) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: title,
+    description,
+    image: absoluteUrl(imagePath ?? DEFAULT_OG_IMAGE_PATH),
+    datePublished: publishedAt,
+    author: {
+      '@type': 'Person',
+        name: author,
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: SITE_NAME,
+      url: SITE_URL,
+      logo: {
+        '@type': 'ImageObject',
+        url: absoluteUrl(DEFAULT_OG_IMAGE_PATH),
+      },
+    },
+    mainEntityOfPage: canonicalUrl(path),
+    url: canonicalUrl(path),
+  }
+}
